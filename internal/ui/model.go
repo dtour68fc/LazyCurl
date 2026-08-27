@@ -190,6 +190,11 @@ type Model struct {
 	importModal        *ImportModalModel
 	openAPIImportModal *OpenAPIImportModal
 
+	// Variable hover-edit modal (Shift+E on a {{var}} token)
+	variableEditModal *components.Modal
+	pendingVarName    string
+	pendingVarIsNew   bool
+
 	// External editor state
 	externalEditorActive bool              // Whether external editor is currently open
 	externalEditorInfo   *api.TempFileInfo // Temp file info for cleanup
@@ -281,6 +286,11 @@ func NewModel(globalConfig *config.GlobalConfig, workspaceConfig *config.Workspa
 		importModal:        NewImportModal(),
 		openAPIImportModal: NewOpenAPIImportModal(collectionsDir),
 		scriptExecutor:     api.NewScriptExecutor(),
+		variableEditModal: components.NewFormModal("Edit Variable", "edit_hover_var", []components.FormField{
+			{Name: "value", Label: "Value", Type: "text"},
+			{Name: "secret", Label: "Secret", Type: "checkbox"},
+			{Name: "active", Label: "Active", Type: "checkbox", Value: "true"},
+		}),
 	}
 }
 
@@ -327,6 +337,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case tea.WindowSizeMsg:
 			m.openAPIImportModal.SetSize(msg.Width, msg.Height)
+		}
+		return m, nil
+	}
+
+	// Handle variable hover-edit modal input if visible (Shift+E on a {{var}})
+	if m.variableEditModal.IsVisible() {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			var cmd tea.Cmd
+			m.variableEditModal, cmd = m.variableEditModal.Update(keyMsg)
+			if cmd != nil {
+				if closeMsg, ok := cmd().(components.ModalCloseMsg); ok {
+					return m.handleVariableModalClose(closeMsg)
+				}
+			}
 		}
 		return m, nil
 	}
@@ -438,6 +462,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.sendHTTPRequest()
 		}
 
+		// Shift+I edits the URL from ANY Request sub-tab (global handler). The URL bar
+		// is always visible regardless of which tab (Params/Auth/Headers/Body/Scripts)
+		// is focused, but "I" used to only work from Params/Headers - on Body/Scripts it
+		// got swallowed by the editor's own vim "I" (insert at line start), and on
+		// Authorization it just did nothing.
+		if m.activePanel == RequestPanel && msg.String() == "I" &&
+			!m.requestPanel.IsEditingURL() && !m.requestPanel.IsEditorInInsertMode() &&
+			!m.requestPanel.IsScriptsEditorInInsertMode() && !m.requestPanel.IsAuthEditing() {
+			m.requestPanel.editingURL = true
+			m.requestPanel.urlCursor = len(m.requestPanel.url)
+			return m, nil
+		}
+
+		// Shift+E opens a quick edit modal for the {{variable}} under the cursor -
+		// in the URL bar (while editing it), in the Body JSON editor, or the first
+		// variable found in the currently selected Headers/Params row. Creates the
+		// variable in the active environment if it doesn't exist yet.
+		if m.activePanel == RequestPanel && msg.String() == "E" {
+			if name, ok := m.findHoveredVariable(); ok {
+				m.openVariableEditModal(name)
+				return m, nil
+			}
+		}
+
 		// CTRL+I opens import cURL modal (global handler)
 		if m.matchKey(msg.String(), m.globalConfig.KeyBindings.ImportCurl) {
 			m.importModal.SetSize(m.width, m.height)
@@ -539,6 +587,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activePanel == RequestPanel && m.requestPanel.IsEditorActive() {
 			typing := m.requestPanel.IsEditorInInsertMode() || m.requestPanel.IsScriptsEditorInInsertMode()
 			if !typing {
+				// Same quit key as everywhere else in the app ('q' by default), not just
+				// the editor's own uppercase 'Q'. Only while not typing, obviously.
+				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.Quit) {
+					return m.saveSessionAndQuit()
+				}
 				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusCollections) {
 					m.activePanel = CollectionsPanel
 					if m.isFullscreen {
@@ -1724,6 +1777,12 @@ func (m Model) View() string {
 	if m.openAPIImportModal.IsVisible() {
 		openAPIView := m.openAPIImportModal.View()
 		result = m.overlayDialog(result, openAPIView)
+	}
+
+	// Overlay variable hover-edit modal if visible
+	if m.variableEditModal.IsVisible() {
+		varView := m.variableEditModal.View(m.width, m.height)
+		result = m.overlayDialog(result, varView)
 	}
 
 	return result

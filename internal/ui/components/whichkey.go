@@ -335,14 +335,16 @@ func (w *WhichKey) initBindings() {
 		{
 			Name: "Params",
 			Bindings: []KeyBinding{
+				{Key: "I", Desc: "Edit URL"},
+				{Key: "Shift+E", Desc: "Edit var"},
 				{Key: "j/k", Desc: "Up/Down"},
 				{Key: "h/l", Desc: "Section"},
 				{Key: "n", Desc: "New param"},
 				{Key: "c/i", Desc: "Edit"},
 				{Key: "d", Desc: "Delete"},
 				{Key: "space", Desc: "Toggle"},
-				{Key: "H/L", Desc: "Panel"},
-				{Key: "tab", Desc: "Next tab"},
+				{Key: "Shift+H/L", Desc: "Cycle tabs"},
+				{Key: "1/2/3", Desc: "Switch window"},
 			},
 		},
 	}
@@ -351,11 +353,13 @@ func (w *WhichKey) initBindings() {
 		{
 			Name: "Authorization",
 			Bindings: []KeyBinding{
+				{Key: "I", Desc: "Edit URL"},
+				{Key: "Shift+E", Desc: "Edit var"},
 				{Key: "j/k", Desc: "Navigate"},
 				{Key: "h/l", Desc: "Change type"},
 				{Key: "i/c/Enter", Desc: "Edit"},
-				{Key: "H/L", Desc: "Panel"},
-				{Key: "tab", Desc: "Next tab"},
+				{Key: "Shift+H/L", Desc: "Cycle tabs"},
+				{Key: "1/2/3", Desc: "Switch window"},
 				{Key: "ctrl+s", Desc: "Send"},
 			},
 		},
@@ -365,13 +369,15 @@ func (w *WhichKey) initBindings() {
 		{
 			Name: "Headers",
 			Bindings: []KeyBinding{
+				{Key: "I", Desc: "Edit URL"},
+				{Key: "Shift+E", Desc: "Edit var"},
 				{Key: "j/k", Desc: "Up/Down"},
 				{Key: "n", Desc: "New header"},
 				{Key: "c/i", Desc: "Edit"},
 				{Key: "d", Desc: "Delete"},
 				{Key: "space", Desc: "Toggle"},
-				{Key: "H/L", Desc: "Panel"},
-				{Key: "tab", Desc: "Next tab"},
+				{Key: "Shift+H/L", Desc: "Cycle tabs"},
+				{Key: "1/2/3", Desc: "Switch window"},
 			},
 		},
 	}
@@ -380,12 +386,14 @@ func (w *WhichKey) initBindings() {
 		{
 			Name: "Body",
 			Bindings: []KeyBinding{
+				{Key: "I", Desc: "Edit URL"},
+				{Key: "Shift+E", Desc: "Edit var"},
 				{Key: "h/l", Desc: "Cursor"},
 				{Key: "j/k", Desc: "Up/Down"},
 				{Key: "i", Desc: "Insert mode"},
 				{Key: "ctrl+f", Desc: "Format"},
-				{Key: "H/L", Desc: "Panel"},
-				{Key: "tab", Desc: "Next tab"},
+				{Key: "Shift+H/L", Desc: "Cycle tabs"},
+				{Key: "1/2/3", Desc: "Switch window"},
 			},
 		},
 	}
@@ -394,12 +402,14 @@ func (w *WhichKey) initBindings() {
 		{
 			Name: "Scripts",
 			Bindings: []KeyBinding{
+				{Key: "I", Desc: "Edit URL"},
+				{Key: "Shift+E", Desc: "Edit var"},
 				{Key: "h/l", Desc: "Cursor"},
 				{Key: "j/k", Desc: "Up/Down"},
 				{Key: "[/]", Desc: "Section"},
 				{Key: "i", Desc: "Insert mode"},
-				{Key: "H/L", Desc: "Panel"},
-				{Key: "tab", Desc: "Next tab"},
+				{Key: "Shift+H/L", Desc: "Cycle tabs"},
+				{Key: "1/2/3", Desc: "Switch window"},
 			},
 		},
 	}

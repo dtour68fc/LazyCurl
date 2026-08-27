@@ -47,8 +47,7 @@ def convert_body(body):
     if not body:
         return {}
     mime = body.get("mimeType", "")
-    if "json" in mime or "text" in mime or mime == "":
-        return {"mode": "raw", "raw": body.get("text", "")}
+    text = body.get("text", "")
     if "form" in mime and body.get("params"):
         return {
             "mode": "urlencoded",
@@ -57,7 +56,21 @@ def convert_body(body):
                 for p in body.get("params", [])
             ],
         }
-    return {"mode": "raw", "raw": body.get("text", "")}
+    # LazyCurl's Postman importer ONLY treats a raw body as JSON if
+    # options.raw.language == "json" is explicitly set - without it every
+    # body lands as an unimplemented "raw" editor. Must set this explicitly.
+    if "xml" in mime:
+        lang = "xml"
+    elif "html" in mime:
+        lang = "html"
+    elif "javascript" in mime:
+        lang = "javascript"
+    elif "json" in mime or mime == "":
+        lang = "json"
+    else:
+        lang = "text"
+    return {"mode": "raw", "raw": text, "options": {"raw": {"language": lang}}}
+
 
 
 def convert_auth(auth):
