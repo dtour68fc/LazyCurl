@@ -20,19 +20,33 @@ import (
 type EnvNodeType int
 
 const (
-	EnvNode EnvNodeType = iota
+	ProjectNode EnvNodeType = iota
+	EnvNode
 	VarNode
 )
+
+// UngroupedProject is the bucket name used for environments with no Project
+// set (legacy environments created before project grouping existed).
+const UngroupedProject = "Ungrouped"
 
 // EnvTreeNode represents a node in the environment tree
 type EnvTreeNode struct {
 	Name     string
 	Type     EnvNodeType
 	Variable *api.EnvironmentVariable // For VarNode
-	Expanded bool                     // Only for EnvNode
+	Expanded bool                     // Only for EnvNode/ProjectNode
 	Children []*EnvTreeNode
 	Parent   *EnvTreeNode
-	EnvFile  *api.EnvironmentFile // Reference to source environment
+	EnvFile  *api.EnvironmentFile // Reference to source environment (EnvNode/VarNode)
+}
+
+// Depth returns the nesting depth of the node (0 = project root).
+func (n *EnvTreeNode) Depth() int {
+	d := 0
+	for p := n.Parent; p != nil; p = p.Parent {
+		d++
+	}
+	return d
 }
 
 // EnvClipboard holds copied environment data
@@ -53,7 +67,9 @@ type EnvironmentsView struct {
 	cursor           int
 	scrollOffset     int
 	height           int
-	activeEnvName    string // Currently active environment
+	activeEnvName    string            // Currently active environment (display name, may not be unique)
+	activeEnvPath    string            // Currently active environment's file path (authoritative identity)
+	activeEnvByProj  map[string]string // Remembers last-active environment per project
 	clipboard        *EnvClipboard
 
 	// Search
@@ -77,6 +93,7 @@ func NewEnvironmentsView(workspacePath string) *EnvironmentsView {
 		cursor:           0,
 		scrollOffset:     0,
 		activeEnvName:    "",
+		activeEnvByProj:  make(map[string]string),
 		search:           components.NewSearchInput(),
 	}
 
@@ -89,7 +106,8 @@ func NewEnvironmentsView(workspacePath string) *EnvironmentsView {
 		{Name: "active", Label: "Active", Type: "checkbox", Value: "true"},
 	})
 	ev.newEnvModal = components.NewFormModal("New Environment", "new_env", []components.FormField{
-		{Name: "name", Label: "Name", Type: "text", Placeholder: "environment_name"},
+		{Name: "project", Label: "Project", Type: "text", Placeholder: "e.g. PMC, PMV (new or existing)"},
+		{Name: "name", Label: "Name", Type: "text", Placeholder: "e.g. Localhost, Staging, Production"},
 		{Name: "description", Label: "Description", Type: "text", Placeholder: "optional description"},
 	})
 	ev.editModal = components.NewFormModal("Edit Value", "edit", []components.FormField{
@@ -121,6 +139,7 @@ func (e *EnvironmentsView) loadEnvironments() {
 	// Set first environment as active by default
 	if len(e.environments) > 0 && e.activeEnvName == "" {
 		e.activeEnvName = e.environments[0].Name
+		e.rememberActive(e.environments[0])
 	}
 }
 
@@ -128,48 +147,107 @@ func (e *EnvironmentsView) loadEnvironments() {
 func (e *EnvironmentsView) buildTree() {
 	// Preserve expanded state from old tree
 	expandedEnvs := make(map[string]bool)
+	expandedProjects := make(map[string]bool)
 	for _, node := range e.tree {
-		if node.Type == EnvNode {
-			expandedEnvs[node.EnvFile.FilePath] = node.Expanded
-		}
+		e.collectExpandedState(node, expandedProjects, expandedEnvs)
 	}
 
-	e.tree = make([]*EnvTreeNode, 0, len(e.environments))
-
+	// Group environments by project (empty Project -> Ungrouped bucket)
+	byProject := make(map[string][]*api.EnvironmentFile)
 	for _, env := range e.environments {
-		// Restore expanded state if it existed
-		expanded := expandedEnvs[env.FilePath]
-
-		envNode := &EnvTreeNode{
-			Name:     env.Name,
-			Type:     EnvNode,
-			Expanded: expanded,
-			EnvFile:  env,
-			Children: make([]*EnvTreeNode, 0),
+		proj := env.Project
+		if proj == "" {
+			proj = UngroupedProject
 		}
-
-		// Sort variable names for consistent display
-		varNames := make([]string, 0, len(env.Variables))
-		for name := range env.Variables {
-			varNames = append(varNames, name)
-		}
-		sort.Strings(varNames)
-
-		// Create child nodes for each variable
-		for _, name := range varNames {
-			variable := env.Variables[name]
-			varNode := &EnvTreeNode{
-				Name:     name,
-				Type:     VarNode,
-				Variable: variable,
-				Parent:   envNode,
-				EnvFile:  env,
-			}
-			envNode.Children = append(envNode.Children, varNode)
-		}
-
-		e.tree = append(e.tree, envNode)
+		byProject[proj] = append(byProject[proj], env)
 	}
+
+	projectNames := make([]string, 0, len(byProject))
+	for name := range byProject {
+		projectNames = append(projectNames, name)
+	}
+	sort.Strings(projectNames)
+
+	e.tree = make([]*EnvTreeNode, 0, len(projectNames))
+
+	for _, projName := range projectNames {
+		envs := byProject[projName]
+		sort.Slice(envs, func(i, j int) bool { return envs[i].Name < envs[j].Name })
+
+		projNode := &EnvTreeNode{
+			Name:     projName,
+			Type:     ProjectNode,
+			Expanded: expandedProjects[projName],
+			Children: make([]*EnvTreeNode, 0, len(envs)),
+		}
+
+		for _, env := range envs {
+			expanded := expandedEnvs[env.FilePath]
+
+			envNode := &EnvTreeNode{
+				Name:     env.Name,
+				Type:     EnvNode,
+				Expanded: expanded,
+				EnvFile:  env,
+				Parent:   projNode,
+				Children: make([]*EnvTreeNode, 0),
+			}
+
+			// Sort variable names for consistent display
+			varNames := make([]string, 0, len(env.Variables))
+			for name := range env.Variables {
+				varNames = append(varNames, name)
+			}
+			sort.Strings(varNames)
+
+			// Create child nodes for each variable
+			for _, name := range varNames {
+				variable := env.Variables[name]
+				varNode := &EnvTreeNode{
+					Name:     name,
+					Type:     VarNode,
+					Variable: variable,
+					Parent:   envNode,
+					EnvFile:  env,
+				}
+				envNode.Children = append(envNode.Children, varNode)
+			}
+
+			projNode.Children = append(projNode.Children, envNode)
+		}
+
+		e.tree = append(e.tree, projNode)
+	}
+}
+
+// collectExpandedState walks an existing tree (before a rebuild) recording
+// which project/environment nodes were expanded, so buildTree can restore it.
+func (e *EnvironmentsView) collectExpandedState(node *EnvTreeNode, projects, envs map[string]bool) {
+	switch node.Type {
+	case ProjectNode:
+		projects[node.Name] = node.Expanded
+	case EnvNode:
+		if node.EnvFile != nil {
+			envs[node.EnvFile.FilePath] = node.Expanded
+		}
+	}
+	for _, c := range node.Children {
+		e.collectExpandedState(c, projects, envs)
+	}
+}
+
+// projectOfNode returns the project name a given node belongs to, regardless
+// of whether it's a ProjectNode itself, an EnvNode, or a VarNode.
+func (e *EnvironmentsView) projectOfNode(node *EnvTreeNode) string {
+	for n := node; n != nil; n = n.Parent {
+		if n.Type == ProjectNode {
+			if n.Name == UngroupedProject {
+				return ""
+			}
+			return n.Name
+		}
+	}
+	return ""
 }
 
 // refresh rebuilds the visible list
@@ -199,7 +277,7 @@ func (e *EnvironmentsView) flattenNode(node *EnvTreeNode) {
 	}
 
 	e.visible = append(e.visible, node)
-	if (node.Expanded || e.searchQuery != "") && node.Type == EnvNode {
+	if (node.Expanded || e.searchQuery != "") && (node.Type == EnvNode || node.Type == ProjectNode) {
 		// When searching, show all matching children regardless of expanded state
 		for _, child := range node.Children {
 			e.flattenNode(child)
@@ -214,8 +292,8 @@ func (e *EnvironmentsView) nodeMatchesSearch(node *EnvTreeNode) bool {
 		return true
 	}
 
-	// For EnvNode, check if any child variable matches
-	if node.Type == EnvNode {
+	// For EnvNode/ProjectNode, check if any child matches
+	if node.Type == EnvNode || node.Type == ProjectNode {
 		for _, child := range node.Children {
 			if e.nodeMatchesSearch(child) {
 				return true
@@ -265,7 +343,11 @@ func (e *EnvironmentsView) envNameExists(name string) bool {
 // saveEnvironment saves an environment to disk
 func (e *EnvironmentsView) saveEnvironment(env *api.EnvironmentFile) error {
 	if env.FilePath == "" {
-		env.FilePath = filepath.Join(e.environmentsPath, strings.ToLower(strings.ReplaceAll(env.Name, " ", "-"))+".json")
+		base := env.Name
+		if env.Project != "" {
+			base = env.Project + "-" + env.Name
+		}
+		env.FilePath = filepath.Join(e.environmentsPath, strings.ToLower(strings.ReplaceAll(base, " ", "-"))+".json")
 	}
 	return api.SaveEnvironment(env, env.FilePath)
 }
@@ -430,21 +512,21 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 				e.scrollIntoView()
 			}
 		case "l", "right", " ":
-			// Expand environment
+			// Expand project or environment
 			if node := e.getCurrentNode(); node != nil {
-				if node.Type == EnvNode && !node.Expanded {
+				if (node.Type == EnvNode || node.Type == ProjectNode) && !node.Expanded {
 					node.Expanded = true
 					e.refresh()
 				}
 			}
 		case "h", "left":
-			// Collapse environment or go to parent
+			// Collapse project/environment or go to parent
 			if node := e.getCurrentNode(); node != nil {
-				if node.Type == EnvNode && node.Expanded {
+				if (node.Type == EnvNode || node.Type == ProjectNode) && node.Expanded {
 					node.Expanded = false
 					e.refresh()
-				} else if node.Type == VarNode && node.Parent != nil {
-					// Go to parent environment
+				} else if node.Parent != nil {
+					// Go to parent node (variable -> env, or env -> project)
 					for i, n := range e.visible {
 						if n == node.Parent {
 							e.cursor = i
@@ -475,7 +557,7 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 						_ = e.saveEnvironment(env) // Error intentionally ignored for UI responsiveness
 					}
 				} else if node.Type == EnvNode {
-					e.activeEnvName = node.Name
+					e.setActiveEnvironmentNode(node)
 				}
 			}
 
@@ -483,9 +565,9 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 			// Select environment
 			if node := e.getCurrentNode(); node != nil {
 				if node.Type == EnvNode {
-					e.activeEnvName = node.Name
-				} else if node.Parent != nil {
-					e.activeEnvName = node.Parent.Name
+					e.setActiveEnvironmentNode(node)
+				} else if node.Type == VarNode && node.Parent != nil {
+					e.setActiveEnvironmentNode(node.Parent)
 				}
 			}
 
@@ -493,9 +575,9 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 			// Set as active environment
 			if node := e.getCurrentNode(); node != nil {
 				if node.Type == EnvNode {
-					e.activeEnvName = node.Name
-				} else if node.Parent != nil {
-					e.activeEnvName = node.Parent.Name
+					e.setActiveEnvironmentNode(node)
+				} else if node.Type == VarNode && node.Parent != nil {
+					e.setActiveEnvironmentNode(node.Parent)
 				}
 			}
 
@@ -528,9 +610,12 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 			if node := e.getCurrentNode(); node != nil {
 				e.pendingNode = node
 				e.renameModal.SetFieldValue("input", node.Name)
-				if node.Type == EnvNode {
+				switch node.Type {
+				case ProjectNode:
+					e.renameModal.Title = "Rename Project"
+				case EnvNode:
 					e.renameModal.Title = "Rename Environment"
-				} else {
+				default:
 					e.renameModal.Title = "Rename Variable"
 				}
 				e.renameModal.Show()
@@ -540,13 +625,20 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 			// Delete
 			if node := e.getCurrentNode(); node != nil {
 				e.pendingNode = node
-				if node.Type == EnvNode {
+				switch node.Type {
+				case ProjectNode:
+					// Deleting a whole project isn't supported yet - it spans
+					// multiple environment files. No-op rather than crash.
+				case EnvNode:
 					e.deleteModal.Message = "Delete environment: " + node.Name + "?"
-				} else {
-					path := node.Parent.Name + "/" + node.Name
-					e.deleteModal.Message = "Delete variable: " + path + "?"
+					e.deleteModal.Show()
+				case VarNode:
+					if node.Parent != nil {
+						path := node.Parent.Name + "/" + node.Name
+						e.deleteModal.Message = "Delete variable: " + path + "?"
+						e.deleteModal.Show()
+					}
 				}
-				e.deleteModal.Show()
 			}
 
 		case "D":
@@ -598,15 +690,15 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 			}
 
 		case "y":
-			// Yank (copy)
-			if node := e.getCurrentNode(); node != nil {
+			// Yank (copy) - not supported for ProjectNode (spans multiple files)
+			if node := e.getCurrentNode(); node != nil && node.Type != ProjectNode {
 				e.clipboard = &EnvClipboard{
 					Type: node.Type,
 					Name: node.Name,
 				}
 				if node.Type == EnvNode {
 					e.clipboard.EnvFile = node.EnvFile.Clone()
-				} else {
+				} else if node.Variable != nil {
 					e.clipboard.VarData = &api.EnvironmentVariable{
 						Value:  node.Variable.Value,
 						Secret: node.Variable.Secret,
@@ -654,7 +746,7 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 				e.nextMatch()
 				return e, nil
 			}
-			if node := e.getCurrentNode(); node != nil {
+			if node := e.getCurrentNode(); node != nil && node.Type != ProjectNode {
 				e.pendingNode = node
 				// Reset form
 				e.newVarModal.SetFieldValue("name", "")
@@ -673,6 +765,13 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 			e.pendingNode = nil
 			e.newEnvModal.SetFieldValue("name", "")
 			e.newEnvModal.SetFieldValue("description", "")
+			// Prefill the project from whatever's currently selected, so adding
+			// another environment to the same project doesn't require retyping it
+			if node := e.getCurrentNode(); node != nil {
+				e.newEnvModal.SetFieldValue("project", e.projectOfNode(node))
+			} else {
+				e.newEnvModal.SetFieldValue("project", "")
+			}
 			e.newEnvModal.Show()
 
 		case "g":
@@ -716,8 +815,9 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 					_ = os.Remove(e.pendingNode.EnvFile.FilePath)
 				}
 				// Clear active environment if it was the deleted one
-				if e.activeEnvName == e.pendingNode.Name {
+				if e.pendingNode.EnvFile != nil && e.activeEnvPath == e.pendingNode.EnvFile.FilePath {
 					e.activeEnvName = ""
+					e.activeEnvPath = ""
 				}
 				// Remove from list
 				for i, env := range e.environments {
@@ -729,6 +829,7 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 				// Set first remaining environment as active if none selected
 				if e.activeEnvName == "" && len(e.environments) > 0 {
 					e.activeEnvName = e.environments[0].Name
+					e.rememberActive(e.environments[0])
 				}
 			} else {
 				// Delete variable
@@ -757,16 +858,36 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 		if e.pendingNode != nil {
 			newName := msg.Result.Values["input"].(string)
 			if newName != "" && newName != e.pendingNode.Name {
-				env := e.getEnvForNode(e.pendingNode)
-				if e.pendingNode.Type == EnvNode {
-					env.Name = newName
-					_ = e.saveEnvironment(env) // Error intentionally ignored for UI responsiveness
-				} else if env != nil {
-					// Rename variable
-					v := env.Variables[e.pendingNode.Name]
-					delete(env.Variables, e.pendingNode.Name)
-					env.Variables[newName] = v
-					_ = e.saveEnvironment(env) // Error intentionally ignored for UI responsiveness
+				if e.pendingNode.Type == ProjectNode {
+					// Renaming a project = updating the Project field on every
+					// environment currently grouped under the old name.
+					oldName := e.pendingNode.Name
+					if oldName == UngroupedProject {
+						oldName = ""
+					}
+					for _, env := range e.environments {
+						if env.Project == oldName {
+							env.Project = newName
+							_ = e.saveEnvironment(env) // Error intentionally ignored for UI responsiveness
+						}
+					}
+					// Remember the active-env-per-project mapping under the new name too
+					if v, ok := e.activeEnvByProj[oldName]; ok {
+						e.activeEnvByProj[newName] = v
+						delete(e.activeEnvByProj, oldName)
+					}
+				} else {
+					env := e.getEnvForNode(e.pendingNode)
+					if e.pendingNode.Type == EnvNode {
+						env.Name = newName
+						_ = e.saveEnvironment(env) // Error intentionally ignored for UI responsiveness
+					} else if env != nil {
+						// Rename variable
+						v := env.Variables[e.pendingNode.Name]
+						delete(env.Variables, e.pendingNode.Name)
+						env.Variables[newName] = v
+						_ = e.saveEnvironment(env) // Error intentionally ignored for UI responsiveness
+					}
 				}
 				e.buildTree()
 				e.refresh()
@@ -802,11 +923,16 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 	case "new_env":
 		name := msg.Result.Values["name"].(string)
 		desc := msg.Result.Values["description"].(string)
+		project := ""
+		if p, ok := msg.Result.Values["project"].(string); ok {
+			project = strings.TrimSpace(p)
+		}
 
 		if name != "" {
 			newEnv := &api.EnvironmentFile{
 				Name:        name,
 				Description: desc,
+				Project:     project,
 				Variables:   make(map[string]*api.EnvironmentVariable),
 			}
 			e.environments = append(e.environments, newEnv)
@@ -885,9 +1011,15 @@ func (e EnvironmentsView) View(width, height int, active bool) string {
 // countAllNodes counts total nodes in tree
 func (e *EnvironmentsView) countAllNodes() int {
 	count := 0
+	var walk func(n *EnvTreeNode)
+	walk = func(n *EnvTreeNode) {
+		count++
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
 	for _, node := range e.tree {
-		count++                     // env node
-		count += len(node.Children) // variable nodes
+		walk(node)
 	}
 	return count
 }
@@ -898,15 +1030,17 @@ func (e *EnvironmentsView) countDirectMatches() int {
 		return 0
 	}
 	count := 0
-	for _, node := range e.tree {
-		if components.MatchesQuery(node.Name, e.searchQuery) {
+	var walk func(n *EnvTreeNode)
+	walk = func(n *EnvTreeNode) {
+		if components.MatchesQuery(n.Name, e.searchQuery) {
 			count++
 		}
-		for _, child := range node.Children {
-			if components.MatchesQuery(child.Name, e.searchQuery) {
-				count++
-			}
+		for _, c := range n.Children {
+			walk(c)
 		}
+	}
+	for _, node := range e.tree {
+		walk(node)
 	}
 	return count
 }
@@ -919,7 +1053,30 @@ func (e *EnvironmentsView) renderNode(node *EnvTreeNode, width int, selected boo
 	isDirectMatch := e.searchQuery != "" && components.MatchesQuery(node.Name, e.searchQuery)
 	isSearching := e.searchQuery != ""
 
+	// Indent nested nodes (Project -> Environment -> Variable) so the
+	// hierarchy is visible, same idea as the Collections tree.
+	indent := strings.Repeat("  ", node.Depth())
+
 	switch node.Type {
+	case ProjectNode:
+		// Project node: ▶/▼ ProjectName
+		icon := "▶ "
+		if node.Expanded {
+			icon = "▼ "
+		}
+		iconStyle := lipgloss.NewStyle().Bold(true)
+		nameStyle := lipgloss.NewStyle().Bold(true)
+		if isSearching {
+			if isDirectMatch {
+				iconStyle = iconStyle.Foreground(styles.SearchMatch)
+				nameStyle = nameStyle.Foreground(styles.SearchMatch)
+			} else {
+				iconStyle = iconStyle.Foreground(styles.SearchDimmed)
+				nameStyle = nameStyle.Foreground(styles.SearchDimmed)
+			}
+		}
+		content = indent + iconStyle.Render(icon) + nameStyle.Render(node.Name)
+
 	case EnvNode:
 		// Environment node: ▶/▼ EnvName ●
 		icon := "▶ "
@@ -927,10 +1084,20 @@ func (e *EnvironmentsView) renderNode(node *EnvTreeNode, width int, selected boo
 			icon = "▼ "
 		}
 
-		// Active indicator
+		// Active indicator - compare by file path, not name, since names
+		// aren't unique across projects (two projects can both have "Localhost").
+		// "●" = actually active right now (this is what requests use today).
+		// "○" = this project's remembered pick, but a different project is
+		// currently in charge (would become active if you switch back here).
 		activeIndicator := ""
-		if node.Name == e.activeEnvName {
+		isGloballyActive := node.EnvFile != nil && node.EnvFile.FilePath == e.activeEnvPath
+		if e.activeEnvPath == "" && node.Name == e.activeEnvName {
+			isGloballyActive = true // legacy fallback before a path was ever recorded
+		}
+		if isGloballyActive {
 			activeIndicator = " ●"
+		} else if e.activeEnvByProj[e.projectOfNode(node)] == node.Name {
+			activeIndicator = " ○"
 		}
 
 		// Apply search styling
@@ -946,7 +1113,7 @@ func (e *EnvironmentsView) renderNode(node *EnvTreeNode, width int, selected boo
 			}
 		}
 
-		content = iconStyle.Render(icon) + nameStyle.Render(node.Name+activeIndicator)
+		content = indent + iconStyle.Render(icon) + nameStyle.Render(node.Name+activeIndicator)
 
 	case VarNode:
 		// Worktree style: > []  value_name   value
@@ -1004,7 +1171,7 @@ func (e *EnvironmentsView) renderNode(node *EnvTreeNode, width int, selected boo
 		checkboxWidth := 3  // "[] " with space
 		prefixWidth := 2    // "> " or "  "
 		separatorWidth := 3 // "   " between key and value
-		availableWidth := width - prefixWidth - checkboxWidth - separatorWidth
+		availableWidth := width - prefixWidth - checkboxWidth - separatorWidth - len(indent)
 		if availableWidth < 10 {
 			availableWidth = 10
 		}
@@ -1035,7 +1202,7 @@ func (e *EnvironmentsView) renderNode(node *EnvTreeNode, width int, selected boo
 			value = value[:valueWidth]
 		}
 
-		content = linePrefix + checkStyle.Render(checkbox) + " " + keyStyle.Render(keyPadded) + "   " + valueStyle.Render(value)
+		content = linePrefix + indent + checkStyle.Render(checkbox) + " " + keyStyle.Render(keyPadded) + "   " + valueStyle.Render(value)
 	}
 
 	// Apply selection styling
@@ -1079,6 +1246,17 @@ func (e *EnvironmentsView) HasActiveModal() bool {
 
 // GetActiveEnvironment returns the currently active environment
 func (e *EnvironmentsView) GetActiveEnvironment() *api.EnvironmentFile {
+	// Prefer matching by file path - environment Names are no longer
+	// guaranteed unique now that they're grouped by project (two projects
+	// can each have a "Localhost" environment).
+	if e.activeEnvPath != "" {
+		for _, env := range e.environments {
+			if env.FilePath == e.activeEnvPath {
+				return env
+			}
+		}
+	}
+	// Fall back to name-only match (legacy sessions / envs with no FilePath yet)
 	for _, env := range e.environments {
 		if env.Name == e.activeEnvName {
 			return env
@@ -1098,13 +1276,108 @@ func (e *EnvironmentsView) SetActiveEnvironmentName(name string) {
 	for _, env := range e.environments {
 		if env.Name == name {
 			e.activeEnvName = name
+			e.rememberActive(env)
 			return
 		}
 	}
 	// If not found, keep current or use first available
 	if e.activeEnvName == "" && len(e.environments) > 0 {
 		e.activeEnvName = e.environments[0].Name
+		e.rememberActive(e.environments[0])
 	}
+}
+
+// SetActiveEnvironmentInProject activates the named environment within a
+// specific project - use this over SetActiveEnvironmentName whenever the
+// project is known, since environment names aren't guaranteed unique across
+// projects (e.g. two projects can each have a "Localhost" environment).
+func (e *EnvironmentsView) SetActiveEnvironmentInProject(project, name string) bool {
+	for _, env := range e.environments {
+		if env.Name == name && env.Project == project {
+			e.activeEnvName = env.Name
+			e.rememberActive(env)
+			return true
+		}
+	}
+	return false
+}
+
+// rememberActive records the given environment as the last-active one for
+// its project, so switching projects and back restores it.
+func (e *EnvironmentsView) rememberActive(env *api.EnvironmentFile) {
+	if e.activeEnvByProj == nil {
+		e.activeEnvByProj = make(map[string]string)
+	}
+	e.activeEnvByProj[env.Project] = env.Name
+	e.activeEnvPath = env.FilePath
+}
+
+// setActiveEnvironmentNode activates the environment an EnvNode points to.
+func (e *EnvironmentsView) setActiveEnvironmentNode(node *EnvTreeNode) {
+	if node == nil || node.EnvFile == nil {
+		return
+	}
+	e.activeEnvName = node.EnvFile.Name
+	e.rememberActive(node.EnvFile)
+}
+
+// SwitchToProject activates the appropriate environment for a project when
+// the user navigates into a collection bound to it:
+//  1. if that project already has a remembered last-active environment, use it
+//  2. otherwise, if the project has any environments, activate the first (sorted)
+//  3. if the project is empty (no Project given, e.g. collection has none set),
+//     do nothing - leave whatever's active alone
+//
+// Returns true if the active environment changed.
+func (e *EnvironmentsView) SwitchToProject(project string) bool {
+	if project == "" {
+		return false
+	}
+
+	// Already on an environment belonging to this project? nothing to do.
+	if active := e.GetActiveEnvironment(); active != nil && active.Project == project {
+		return false
+	}
+
+	if remembered, ok := e.activeEnvByProj[project]; ok {
+		if e.SetActiveEnvironmentInProject(project, remembered) {
+			e.buildTree()
+			e.refresh()
+			return true
+		}
+	}
+
+	// Fall back to the first environment (alphabetically) in that project
+	var candidates []*api.EnvironmentFile
+	for _, env := range e.environments {
+		if env.Project == project {
+			candidates = append(candidates, env)
+		}
+	}
+	if len(candidates) == 0 {
+		return false
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Name < candidates[j].Name })
+	e.activeEnvName = candidates[0].Name
+	e.rememberActive(candidates[0])
+	e.buildTree()
+	e.refresh()
+	return true
+}
+
+// GetActiveEnvironmentByProject returns the remembered last-active environment
+// name for a project, if any.
+func (e *EnvironmentsView) GetActiveEnvironmentByProject() map[string]string {
+	return e.activeEnvByProj
+}
+
+// SetActiveEnvironmentByProject restores the project->env memory map (used
+// when loading a saved session).
+func (e *EnvironmentsView) SetActiveEnvironmentByProject(m map[string]string) {
+	if m == nil {
+		m = make(map[string]string)
+	}
+	e.activeEnvByProj = m
 }
 
 // GetActiveEnvironmentVariables returns the variables of the active environment
@@ -1139,12 +1412,22 @@ func (e *EnvironmentsView) GetBreadcrumb() []string {
 		return []string{}
 	}
 
-	if node.Type == EnvNode {
+	if node.Type == ProjectNode {
 		return []string{node.Name}
 	}
 
-	// VarNode - show environment > variable
+	if node.Type == EnvNode {
+		if node.Parent != nil {
+			return []string{node.Parent.Name, node.Name}
+		}
+		return []string{node.Name}
+	}
+
+	// VarNode - show project > environment > variable
 	if node.Parent != nil {
+		if node.Parent.Parent != nil {
+			return []string{node.Parent.Parent.Name, node.Parent.Name, node.Name}
+		}
 		return []string{node.Parent.Name, node.Name}
 	}
 	return []string{node.Name}

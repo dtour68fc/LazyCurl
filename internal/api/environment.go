@@ -19,6 +19,7 @@ type EnvironmentVariable struct {
 type EnvironmentFile struct {
 	Name        string                          `json:"name"`
 	Description string                          `json:"description,omitempty"`
+	Project     string                          `json:"project,omitempty"` // Groups environments under a project (e.g. "PMC", "PMV")
 	Variables   map[string]*EnvironmentVariable `json:"variables"`
 	FilePath    string                          `json:"-"` // Internal: path to the file
 }
@@ -35,6 +36,7 @@ func LoadEnvironment(path string) (*EnvironmentFile, error) {
 	var rawEnv struct {
 		Name        string                     `json:"name"`
 		Description string                     `json:"description,omitempty"`
+		Project     string                     `json:"project,omitempty"`
 		Variables   map[string]json.RawMessage `json:"variables"`
 	}
 	if err := json.Unmarshal(data, &rawEnv); err != nil {
@@ -44,6 +46,7 @@ func LoadEnvironment(path string) (*EnvironmentFile, error) {
 	env := &EnvironmentFile{
 		Name:        rawEnv.Name,
 		Description: rawEnv.Description,
+		Project:     rawEnv.Project,
 		Variables:   make(map[string]*EnvironmentVariable),
 		FilePath:    path,
 	}
@@ -248,6 +251,7 @@ func (e *EnvironmentFile) Clone() *EnvironmentFile {
 	clone := &EnvironmentFile{
 		Name:        e.Name,
 		Description: e.Description,
+		Project:     e.Project,
 		FilePath:    e.FilePath,
 		Variables:   make(map[string]*EnvironmentVariable),
 	}

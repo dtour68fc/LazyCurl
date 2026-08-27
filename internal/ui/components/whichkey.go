@@ -93,13 +93,14 @@ func (w *WhichKey) initBindings() {
 		{
 			Name: "Tabs",
 			Bindings: []KeyBinding{
-				{Key: "1", Desc: "Collections"},
-				{Key: "2", Desc: "Environments"},
+				{Key: "Shift+H/L", Desc: "Collections/Envs"},
+				{Key: "1/2/3", Desc: "Switch window"},
 			},
 		},
 		{
 			Name: "Actions",
 			Bindings: []KeyBinding{
+				{Key: "P", Desc: "Assign project"},
 				{Key: "n", Desc: "New Request"},
 				{Key: "N", Desc: "New Folder"},
 				{Key: "c/i", Desc: "Edit"},
@@ -137,15 +138,15 @@ func (w *WhichKey) initBindings() {
 		{
 			Name: "Tabs",
 			Bindings: []KeyBinding{
-				{Key: "1", Desc: "Collections"},
-				{Key: "2", Desc: "Environments"},
+				{Key: "Shift+H/L", Desc: "Collections/Envs"},
+				{Key: "1/2/3", Desc: "Switch window"},
 			},
 		},
 		{
 			Name: "Actions",
 			Bindings: []KeyBinding{
 				{Key: "n", Desc: "New Variable"},
-				{Key: "N", Desc: "New Environment"},
+				{Key: "N", Desc: "New Env (+Project)"},
 				{Key: "c/i", Desc: "Edit Value"},
 				{Key: "R", Desc: "Rename"},
 				{Key: "d", Desc: "Delete"},

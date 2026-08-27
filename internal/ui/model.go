@@ -195,6 +195,10 @@ type Model struct {
 	pendingVarName    string
 	pendingVarIsNew   bool
 
+	// Assign-project modal (P on a collection, for environment auto-switching)
+	projectAssignModal *components.Modal
+	pendingProjectColl *api.CollectionFile
+
 	// External editor state
 	externalEditorActive bool              // Whether external editor is currently open
 	externalEditorInfo   *api.TempFileInfo // Temp file info for cleanup
@@ -243,6 +247,7 @@ func NewModel(globalConfig *config.GlobalConfig, workspaceConfig *config.Workspa
 	if sess.ActiveEnvironment != "" {
 		leftPanel.GetEnvironments().SetActiveEnvironmentName(sess.ActiveEnvironment)
 	}
+	leftPanel.GetEnvironments().SetActiveEnvironmentByProject(sess.ActiveEnvironmentByProject)
 
 	// Restore active request (find in tree and load FULL request from collection)
 	if sess.ActiveRequest != "" {
@@ -291,6 +296,7 @@ func NewModel(globalConfig *config.GlobalConfig, workspaceConfig *config.Workspa
 			{Name: "secret", Label: "Secret", Type: "checkbox"},
 			{Name: "active", Label: "Active", Type: "checkbox", Value: "true"},
 		}),
+		projectAssignModal: components.NewInputModal("Assign Project", "Project name", "e.g. PMC, PMV", "assign_project"),
 	}
 }
 
@@ -349,6 +355,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				if closeMsg, ok := cmd().(components.ModalCloseMsg); ok {
 					return m.handleVariableModalClose(closeMsg)
+				}
+			}
+		}
+		return m, nil
+	}
+
+	// Handle project-assignment modal input if visible (P on a collection)
+	if m.projectAssignModal.IsVisible() {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			var cmd tea.Cmd
+			m.projectAssignModal, cmd = m.projectAssignModal.Update(keyMsg)
+			if cmd != nil {
+				if closeMsg, ok := cmd().(components.ModalCloseMsg); ok {
+					return m.handleProjectAssignModalClose(closeMsg)
 				}
 			}
 		}
@@ -459,6 +479,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// CTRL+S sends HTTP request from ANY context (global handler)
 		if msg.String() == "ctrl+s" {
+			m.flushPendingRequestEdits()
 			return m.sendHTTPRequest()
 		}
 
@@ -702,6 +723,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// P on a Collections node assigns/edits which Project that whole
+			// collection belongs to, for environment auto-switching (selecting
+			// a request from a PMC-project collection activates a PMC
+			// environment automatically, same for PMV, etc)
+			if m.activePanel == CollectionsPanel && msg.String() == "P" {
+				if selected := m.leftPanel.GetCollections().Selected(); selected != nil {
+					if coll := m.leftPanel.GetCollections().FindCollectionByNode(selected); coll != nil {
+						m.pendingProjectColl = coll
+						m.projectAssignModal.SetFieldValue("input", coll.Project)
+						m.projectAssignModal.Title = "Assign Project: " + coll.Name
+						m.projectAssignModal.Show()
+					}
+				}
+				return m, nil
+			}
+
 			// Direct panel jump: 1/2/3 -> Collections/Request/Response (lazygit style)
 			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusCollections) {
 				m.activePanel = CollectionsPanel
@@ -850,6 +887,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if req := coll.FindRequest(msg.Node.ID); req != nil {
 					m.requestPanel.LoadCollectionRequest(req)
 					found = true
+					// Auto-switch the active environment to whichever this
+					// collection's Project last had active (or its first
+					// environment), so PMC requests use PMC vars and PMV
+					// requests use PMV vars without manual switching.
+					if coll.Project != "" {
+						if m.leftPanel.GetEnvironments().SwitchToProject(coll.Project) {
+							if env := m.leftPanel.GetEnvironments().GetActiveEnvironment(); env != nil {
+								m.statusBar.SetEnvironment(env.Name)
+							}
+						}
+					}
 					break
 				}
 			}
@@ -1785,6 +1833,12 @@ func (m Model) View() string {
 		result = m.overlayDialog(result, varView)
 	}
 
+	// Overlay project-assignment modal if visible
+	if m.projectAssignModal.IsVisible() {
+		projView := m.projectAssignModal.View(m.width, m.height)
+		result = m.overlayDialog(result, projView)
+	}
+
 	return result
 }
 
@@ -2499,6 +2553,38 @@ func (m *Model) GetWhichKeyHints() string {
 	return m.whichKey.GetHintsForStatusBar(m.whichKey.GetContext())
 }
 
+// flushPendingRequestEdits persists whatever's currently sitting in the Body
+// and Scripts editors to the collection file on disk. Normally this happens
+// automatically when you press Esc to leave an editor's INSERT mode - but
+// Ctrl+S sends the request from ANY context, including while still actively
+// typing, which would otherwise skip that autosave entirely: the request
+// itself would still use the live (unsaved) text since the getters read
+// straight from the editor widget, but the edit would never make it to disk,
+// so it'd look like it "didn't save" the moment you switched away and back.
+func (m *Model) flushPendingRequestEdits() {
+	requestID := m.requestPanel.GetCurrentRequestID()
+	if requestID == "" {
+		return
+	}
+	collections := m.leftPanel.GetCollections()
+	if err := collections.UpdateRequestScriptsByID(
+		requestID,
+		m.requestPanel.GetPreRequestScript(),
+		m.requestPanel.GetPostRequestScript(),
+	); err != nil {
+		m.statusBar.Error(err)
+	}
+	if m.requestPanel.bodyType != NoneBody {
+		if err := collections.UpdateRequestBodyByID(
+			requestID,
+			m.requestPanel.bodyType.String(),
+			m.requestPanel.GetBodyContent(),
+		); err != nil {
+			m.statusBar.Error(err)
+		}
+	}
+}
+
 // sendHTTPRequest builds and sends an HTTP request from the current request panel state
 func (m Model) sendHTTPRequest() (tea.Model, tea.Cmd) {
 	// Check if a request is loaded
@@ -2719,6 +2805,7 @@ func (m *Model) saveSession() {
 
 	// Save active environment
 	m.session.ActiveEnvironment = m.leftPanel.GetEnvironments().GetActiveEnvironmentName()
+	m.session.ActiveEnvironmentByProject = m.leftPanel.GetEnvironments().GetActiveEnvironmentByProject()
 
 	// Get panel states
 	m.session.Panels.Collections = m.leftPanel.GetSessionState()

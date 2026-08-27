@@ -70,6 +70,7 @@ type Folder struct {
 type CollectionFile struct {
 	Name        string              `json:"name"`
 	Description string              `json:"description,omitempty"`
+	Project     string              `json:"project,omitempty"` // Groups this collection under a project (e.g. "PMC", "PMV") for environment auto-switching
 	Folders     []Folder            `json:"folders,omitempty"`
 	Requests    []CollectionRequest `json:"requests,omitempty"`
 	FilePath    string              `json:"-"` // Path to the file (not serialized)

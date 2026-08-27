@@ -21,13 +21,14 @@ const (
 
 // Session represents the complete application state at a point in time.
 type Session struct {
-	Version           int         `yaml:"version"`
-	LastUpdated       time.Time   `yaml:"last_updated"`
-	ActivePanel       string      `yaml:"active_panel"`
-	ActiveCollection  string      `yaml:"active_collection,omitempty"`
-	ActiveRequest     string      `yaml:"active_request,omitempty"`
-	ActiveEnvironment string      `yaml:"active_environment,omitempty"`
-	Panels            PanelsState `yaml:"panels"`
+	Version                    int               `yaml:"version"`
+	LastUpdated                time.Time         `yaml:"last_updated"`
+	ActivePanel                string            `yaml:"active_panel"`
+	ActiveCollection           string            `yaml:"active_collection,omitempty"`
+	ActiveRequest              string            `yaml:"active_request,omitempty"`
+	ActiveEnvironment          string            `yaml:"active_environment,omitempty"`
+	ActiveEnvironmentByProject map[string]string `yaml:"active_environment_by_project,omitempty"`
+	Panels                     PanelsState        `yaml:"panels"`
 }
 
 // PanelsState contains state for all panels.
