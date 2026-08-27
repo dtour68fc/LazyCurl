@@ -124,15 +124,17 @@ func NewEnvironmentsView(workspacePath string) *EnvironmentsView {
 
 // loadEnvironments loads environments from the workspace path
 func (e *EnvironmentsView) loadEnvironments() {
-	envs, err := api.LoadAllEnvironments(e.environmentsPath)
+	local, err := api.LoadAllEnvironments(e.environmentsPath)
 	if err != nil {
-		e.environments = []*api.EnvironmentFile{}
-		e.tree = []*EnvTreeNode{}
-		e.visible = []*EnvTreeNode{}
-		return
+		local = []*api.EnvironmentFile{}
 	}
 
-	e.environments = envs
+	global, err := api.LoadAllEnvironments(config.GetGlobalEnvironmentsPath())
+	if err != nil {
+		global = []*api.EnvironmentFile{}
+	}
+
+	e.environments = mergeEnvironmentsByPath(local, global)
 	e.buildTree()
 	e.refresh()
 
@@ -141,6 +143,23 @@ func (e *EnvironmentsView) loadEnvironments() {
 		e.activeEnvName = e.environments[0].Name
 		e.rememberActive(e.environments[0])
 	}
+}
+
+// mergeEnvironmentsByPath combines two environment slices, de-duplicating by
+// file path (the same environment loaded twice would otherwise show up twice).
+func mergeEnvironmentsByPath(a, b []*api.EnvironmentFile) []*api.EnvironmentFile {
+	seen := make(map[string]bool, len(a))
+	merged := make([]*api.EnvironmentFile, 0, len(a)+len(b))
+	for _, e := range a {
+		seen[e.FilePath] = true
+		merged = append(merged, e)
+	}
+	for _, e := range b {
+		if !seen[e.FilePath] {
+			merged = append(merged, e)
+		}
+	}
+	return merged
 }
 
 // buildTree builds the tree structure from environments

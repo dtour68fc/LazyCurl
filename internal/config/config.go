@@ -235,6 +235,30 @@ func GetGlobalConfigPath() string {
 	return filepath.Join(home, ".config", "lazycurl", "config.yaml")
 }
 
+// GetGlobalConfigDir returns the directory holding the global config file
+// and the global (cross-workspace) collections/environments.
+func GetGlobalConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".lazycurl"
+	}
+	return filepath.Join(home, ".config", "lazycurl")
+}
+
+// GetGlobalCollectionsPath returns the directory for collections that show
+// up in every workspace, regardless of which project directory you launch
+// lazycurl from.
+func GetGlobalCollectionsPath() string {
+	return filepath.Join(GetGlobalConfigDir(), "collections")
+}
+
+// GetGlobalEnvironmentsPath returns the directory for environments that show
+// up in every workspace, regardless of which project directory you launch
+// lazycurl from.
+func GetGlobalEnvironmentsPath() string {
+	return filepath.Join(GetGlobalConfigDir(), "environments")
+}
+
 // GetWorkspacePath returns the workspace path (current directory)
 func GetWorkspacePath() (string, error) {
 	return os.Getwd()

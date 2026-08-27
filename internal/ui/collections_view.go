@@ -32,18 +32,39 @@ func NewCollectionsView(workspacePath string) *CollectionsView {
 	return cv
 }
 
-// loadCollections loads collections from the workspace path
+// loadCollections loads collections from the workspace path, merged with
+// the global (cross-workspace) collections directory so collections created
+// there show up no matter which project you launch lazycurl from.
 func (c *CollectionsView) loadCollections() {
-	collections, err := api.LoadAllCollections(c.collectionsPath)
+	local, err := api.LoadAllCollections(c.collectionsPath)
 	if err != nil {
-		// If no collections or error, create empty tree
-		c.collections = []*api.CollectionFile{}
-		c.tree = components.NewTree(c.collections)
-		return
+		local = []*api.CollectionFile{}
 	}
 
-	c.collections = collections
-	c.tree = components.NewTree(collections)
+	global, err := api.LoadAllCollections(config.GetGlobalCollectionsPath())
+	if err != nil {
+		global = []*api.CollectionFile{}
+	}
+
+	c.collections = mergeCollectionsByPath(local, global)
+	c.tree = components.NewTree(c.collections)
+}
+
+// mergeCollectionsByPath combines two collection slices, de-duplicating by
+// file path (the same collection loaded twice would otherwise show up twice).
+func mergeCollectionsByPath(a, b []*api.CollectionFile) []*api.CollectionFile {
+	seen := make(map[string]bool, len(a))
+	merged := make([]*api.CollectionFile, 0, len(a)+len(b))
+	for _, c := range a {
+		seen[c.FilePath] = true
+		merged = append(merged, c)
+	}
+	for _, c := range b {
+		if !seen[c.FilePath] {
+			merged = append(merged, c)
+		}
+	}
+	return merged
 }
 
 // ReloadCollections reloads collections from disk while preserving tree state
