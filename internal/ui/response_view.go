@@ -149,29 +149,15 @@ func (r ResponseView) UpdateWithHistory(msg tea.Msg, cfg *config.GlobalConfig, h
 	case tea.KeyMsg:
 		activeTab := r.tabs.GetActive()
 
-		// Tab navigation with Tab key - but not when searching
+		// Tab navigation - Shift+H/Shift+L (or Shift+Left/Right, or [ / ]) cycle
+		// Body/Cookies/Headers/Tests/Console. Plain h/l are left free for scrolling.
 		if !r.bodyEditor.IsSearching() {
 			switch msg.String() {
-			case "tab":
-				r.tabs.Next()
-				return r, nil
-			case "shift+tab":
+			case "[", "H", "shift+left":
 				r.tabs.Previous()
 				return r, nil
-			case "1":
-				r.tabs.SetActive(0) // Body
-				return r, nil
-			case "2":
-				r.tabs.SetActive(1) // Cookies
-				return r, nil
-			case "3":
-				r.tabs.SetActive(2) // Headers
-				return r, nil
-			case "4":
-				r.tabs.SetActive(3) // Tests
-				return r, nil
-			case "5":
-				r.tabs.SetActive(4) // Console
+			case "]", "L", "shift+right":
+				r.tabs.Next()
 				return r, nil
 			}
 		}

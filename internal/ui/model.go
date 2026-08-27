@@ -528,29 +528,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// Check if request panel Body or Scripts tab is active - forward most keys to editor
+		// Check if request panel Body or Scripts tab is active - forward most keys to editor.
 		// The editor has its own vim-like modes (NORMAL/INSERT) and handles q, h, l, etc.
-		// This MUST return to prevent quit handler from catching 'q'
-		// BUT: Intercept H/L (uppercase) for panel switching
+		// This MUST return to prevent quit handler from catching 'q'.
+		// H/L used to force a window switch here - that's gone now, H/L cycle the
+		// Request panel's own sub-tabs instead (see request_view.go). Window switching
+		// (1/2/3, Tab/Shift+Tab, Shift+J/Shift+K) still works here, but only while the
+		// inner editor is in its own NORMAL mode - not while actually typing, or "1"
+		// would yank you out of the panel mid-keystroke.
 		if m.activePanel == RequestPanel && m.requestPanel.IsEditorActive() {
-			// H/L (uppercase) switches panels even when editor is active
-			switch msg.String() {
-			case "H":
-				// Switch to left panel (Collections)
-				m.activePanel = CollectionsPanel
-				if m.isFullscreen {
-					m.fullscreenPanel = m.activePanel
+			typing := m.requestPanel.IsEditorInInsertMode() || m.requestPanel.IsScriptsEditorInInsertMode()
+			if !typing {
+				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusCollections) {
+					m.activePanel = CollectionsPanel
+					if m.isFullscreen {
+						m.fullscreenPanel = m.activePanel
+					}
+					return m, m.markSessionDirty()
 				}
-				return m, m.markSessionDirty()
-			case "L":
-				// Switch to right panel (Response)
-				m.activePanel = ResponsePanel
-				if m.isFullscreen {
-					m.fullscreenPanel = m.activePanel
+				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusRequest) {
+					m.activePanel = RequestPanel
+					return m, m.markSessionDirty()
 				}
-				return m, m.markSessionDirty()
+				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusResponse) {
+					m.activePanel = ResponsePanel
+					if m.isFullscreen {
+						m.fullscreenPanel = m.activePanel
+					}
+					return m, m.markSessionDirty()
+				}
+				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.CycleNext) {
+					m.activePanel = (m.activePanel + 1) % 3
+					if m.isFullscreen {
+						m.fullscreenPanel = m.activePanel
+					}
+					return m, m.markSessionDirty()
+				}
+				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.CyclePrev) {
+					m.activePanel = (m.activePanel + 2) % 3
+					if m.isFullscreen {
+						m.fullscreenPanel = m.activePanel
+					}
+					return m, m.markSessionDirty()
+				}
+				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusDown) {
+					m.activePanel = (m.activePanel + 1) % 3
+					if m.isFullscreen {
+						m.fullscreenPanel = m.activePanel
+					}
+					return m, m.markSessionDirty()
+				}
 			}
-			// Forward other keys to editor
+			// Forward other keys to the request panel/editor (this is where H/L now
+			// land, to cycle Params/Auth/Headers/Body/Scripts within the panel)
 			var cmd tea.Cmd
 			*m.requestPanel, cmd = m.requestPanel.Update(msg, m.globalConfig)
 			return m, cmd
@@ -619,78 +649,137 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// Tab switching with 1/2 (when left panel is active)
-			if m.activePanel == CollectionsPanel {
-				if msg.String() == "1" {
-					m.leftPanel.SetActiveTab(CollectionsTab)
-					return m, nil
+			// Direct panel jump: 1/2/3 -> Collections/Request/Response (lazygit style)
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusCollections) {
+				m.activePanel = CollectionsPanel
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
 				}
-				if msg.String() == "2" {
-					m.leftPanel.SetActiveTab(EnvironmentsTab)
+				return m, m.markSessionDirty()
+			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusRequest) {
+				m.activePanel = RequestPanel
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusResponse) {
+				m.activePanel = ResponsePanel
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+
+			// Tab/Shift+Tab cycle through Collections -> Request -> Response -> Collections
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.CycleNext) {
+				m.activePanel = (m.activePanel + 1) % 3
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.CyclePrev) {
+				m.activePanel = (m.activePanel + 2) % 3
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+
+			// Shift+J / Shift+K cycle through all 3 windows, same as Tab/Shift+Tab
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusDown) {
+				m.activePanel = (m.activePanel + 1) % 3
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusUp) {
+				m.activePanel = (m.activePanel + 2) % 3
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+
+			// [ / ] or Shift+H / Shift+L cycle Collections left-panel's own tabs (Collections/Environments)
+			if m.activePanel == CollectionsPanel {
+				switch msg.String() {
+				case "[", "]", "H", "L", "shift+left", "shift+right":
+					if m.leftPanel.GetActiveTab() == CollectionsTab {
+						m.leftPanel.SetActiveTab(EnvironmentsTab)
+					} else {
+						m.leftPanel.SetActiveTab(CollectionsTab)
+					}
 					return m, nil
 				}
 			}
 
-			// Panel navigation with h/l only in NORMAL mode
-			// Skip navigation if search is active in the left panel
-			// Note: Body tab is handled earlier and returns before reaching here
-			// IMPORTANT: In CollectionsPanel, let the tree handle l/h first for expand/collapse
-			if m.mode.AllowsNavigation() && !m.leftPanel.IsSearching() {
-				// Left navigation (h) - in CollectionsPanel, only navigate if at root level collapsed folder
-				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.NavigateLeft) {
-					// In CollectionsPanel, h should collapse folders, not navigate panels
-					// Only navigate panels from Request or Response panels
-					if m.activePanel > CollectionsPanel {
-						m.activePanel--
-						// Update fullscreen panel if in fullscreen mode
-						if m.isFullscreen {
-							m.fullscreenPanel = m.activePanel
-						}
-						return m, m.markSessionDirty()
-					}
-					// In CollectionsPanel, let tree handle h for collapse
-				}
-				// Right navigation (l) - in CollectionsPanel, let tree handle it
-				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.NavigateRight) {
-					// In CollectionsPanel, l should expand folders or select requests
-					// Only navigate panels from Request panel
-					if m.activePanel == RequestPanel {
-						m.activePanel++
-						// Update fullscreen panel if in fullscreen mode
-						if m.isFullscreen {
-							m.fullscreenPanel = m.activePanel
-						}
-						return m, m.markSessionDirty()
-					}
-					// In CollectionsPanel, let tree handle l for expand/select
-					// In ResponsePanel, we're already at the rightmost panel
-				}
-			}
+			// NOTE: plain h/l are NOT used for window or sub-tab switching here.
+			// They stay reserved for whatever the focused panel needs them for
+			// (tree expand/collapse, Params path/query section, Auth field cycling,
+			// editor cursor movement). Shift+H/Shift+L (and Shift+Left/Right) cycle
+			// the sub-tab bar within the active panel instead - see request_view.go /
+			// response_view.go. Window switching lives on 1/2/3, Tab/Shift+Tab, and
+			// Shift+J/Shift+K.
 		}
 
 		// Handle VIEW mode navigation (read-only browsing)
 		if m.mode == ViewMode {
-			if m.mode.AllowsNavigation() {
-				// Same logic as NORMAL mode - let tree handle h/l in CollectionsPanel
-				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.NavigateLeft) {
-					if m.activePanel > CollectionsPanel {
-						m.activePanel--
-						if m.isFullscreen {
-							m.fullscreenPanel = m.activePanel
-						}
-						return m, m.markSessionDirty()
-					}
+			// Direct panel jump / cycle / vertical switch also work in VIEW mode
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusCollections) {
+				m.activePanel = CollectionsPanel
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
 				}
-				if m.matchKey(msg.String(), m.globalConfig.KeyBindings.NavigateRight) {
-					if m.activePanel == RequestPanel {
-						m.activePanel++
-						if m.isFullscreen {
-							m.fullscreenPanel = m.activePanel
-						}
-						return m, m.markSessionDirty()
-					}
-				}
+				return m, m.markSessionDirty()
 			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusRequest) {
+				m.activePanel = RequestPanel
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusResponse) {
+				m.activePanel = ResponsePanel
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.CycleNext) {
+				m.activePanel = (m.activePanel + 1) % 3
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.CyclePrev) {
+				m.activePanel = (m.activePanel + 2) % 3
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusDown) {
+				m.activePanel = (m.activePanel + 1) % 3
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusUp) {
+				m.activePanel = (m.activePanel + 2) % 3
+				if m.isFullscreen {
+					m.fullscreenPanel = m.activePanel
+				}
+				return m, m.markSessionDirty()
+			}
+
+			// h/l intentionally not intercepted here either - see NORMAL mode comment above.
 		}
 
 	case ModeChangeMsg:
@@ -1426,7 +1515,7 @@ func (m Model) renderVerticalLayout() string {
 		topRightHeight-2,
 		m.activePanel == RequestPanel,
 	)
-	requestPanel := m.renderPanel("Request", requestContent, rightWidth, topRightHeight, m.activePanel == RequestPanel)
+	requestPanel := m.renderPanel("2 Request", requestContent, rightWidth, topRightHeight, m.activePanel == RequestPanel)
 
 	// Response panel (bottom right)
 	responseContent := m.responsePanel.ViewWithHistory(
@@ -1435,7 +1524,7 @@ func (m Model) renderVerticalLayout() string {
 		m.activePanel == ResponsePanel,
 		m.consoleHistory,
 	)
-	responsePanel := m.renderPanel("Response", responseContent, rightWidth, bottomRightHeight, m.activePanel == ResponsePanel)
+	responsePanel := m.renderPanel("3 Response", responseContent, rightWidth, bottomRightHeight, m.activePanel == ResponsePanel)
 
 	// Combine right panels vertically - no extra spacing
 	rightSide := requestPanel + "\n" + responsePanel
@@ -1488,7 +1577,7 @@ func (m Model) renderHorizontalLayout() string {
 		requestHeight-2,
 		m.activePanel == RequestPanel,
 	)
-	requestPanel := m.renderPanel("Request", requestContent, panelWidth, requestHeight, m.activePanel == RequestPanel)
+	requestPanel := m.renderPanel("2 Request", requestContent, panelWidth, requestHeight, m.activePanel == RequestPanel)
 
 	// Response panel (bottom)
 	responseContent := m.responsePanel.ViewWithHistory(
@@ -1497,7 +1586,7 @@ func (m Model) renderHorizontalLayout() string {
 		m.activePanel == ResponsePanel,
 		m.consoleHistory,
 	)
-	responsePanel := m.renderPanel("Response", responseContent, panelWidth, responseHeight, m.activePanel == ResponsePanel)
+	responsePanel := m.renderPanel("3 Response", responseContent, panelWidth, responseHeight, m.activePanel == ResponsePanel)
 
 	// Stack panels vertically
 	return collectionsPanel + "\n" + requestPanel + "\n" + responsePanel
@@ -1534,7 +1623,7 @@ func (m Model) renderFullscreenLayout() string {
 		return m.renderPanelWithTabs(m.leftPanel, content, panelWidth, contentHeight, true)
 
 	case RequestPanel:
-		panelTitle = "Request"
+		panelTitle = "2 Request"
 		panelContent = m.requestPanel.View(
 			panelWidth-4,
 			contentHeight-2,
@@ -1542,7 +1631,7 @@ func (m Model) renderFullscreenLayout() string {
 		)
 
 	case ResponsePanel:
-		panelTitle = "Response"
+		panelTitle = "3 Response"
 		panelContent = m.responsePanel.ViewWithHistory(
 			panelWidth-4,
 			contentHeight-2,

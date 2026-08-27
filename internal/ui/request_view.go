@@ -590,6 +590,12 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 			case "shift+tab":
 				r.tabs.Previous()
 				return r, nil
+			case "H", "shift+left":
+				r.tabs.Previous()
+				return r, nil
+			case "L", "shift+right":
+				r.tabs.Next()
+				return r, nil
 			case "1", "2", "3", "4", "5":
 				// Allow number-based tab switching
 				switch msg.String() {
@@ -639,6 +645,13 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 			case "shift+tab":
 				r.tabs.Previous()
 				return r, nil
+			case "H", "shift+left":
+				// Note: [ / ] are already claimed here for Pre/Post-request section
+				r.tabs.Previous()
+				return r, nil
+			case "L", "shift+right":
+				r.tabs.Next()
+				return r, nil
 			case "1", "2", "3", "4", "5":
 				// Allow number-based tab switching
 				switch msg.String() {
@@ -677,6 +690,19 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 			}
 		}
 
+		// Tab navigation - Shift+H/Shift+L (or Shift+Left/Right, or [ / ]) cycle
+		// Params/Auth/Headers/Body/Scripts. Plain h/l are NOT used here - they stay
+		// reserved for whatever the active tab needs them for (Params path/query
+		// section, Auth field cycling, editor cursor movement).
+		switch msg.String() {
+		case "[", "H", "shift+left":
+			r.tabs.Previous()
+			return r, nil
+		case "]", "L", "shift+right":
+			r.tabs.Next()
+			return r, nil
+		}
+
 		// If in Authorization tab, handle auth-specific keys
 		if r.tabs.GetActive() == "Authorization" {
 			return r.handleAuthInput(msg)
@@ -695,34 +721,16 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 			return r, nil
 		}
 
-		// Tab navigation with numbers 1-5 (NORMAL mode)
-		switch msg.String() {
-		case "tab":
-			r.tabs.Next()
-		case "shift+tab":
-			r.tabs.Previous()
-		case "1":
-			r.tabs.SetActive(0) // Params
-		case "2":
-			r.tabs.SetActive(1) // Authorization
-		case "3":
-			r.tabs.SetActive(2) // Headers
-		case "4":
-			r.tabs.SetActive(3) // Body
-		case "5":
-			r.tabs.SetActive(4) // Scripts
-		}
-
 		// Handle Params tab section switching with h/l when in Params tab
 		if r.tabs.GetActive() == "Params" {
 			switch msg.String() {
-			case "h":
+			case "h", "left":
 				// Switch to Path Params section (left)
 				if r.paramsSection != PathParamsSection {
 					r.paramsSection = PathParamsSection
 					return r, nil
 				}
-			case "l":
+			case "l", "right":
 				// Switch to Query Params section (right)
 				if r.paramsSection != QueryParamsSection {
 					r.paramsSection = QueryParamsSection

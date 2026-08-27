@@ -75,6 +75,10 @@ type KeyBindings struct {
 	FocusCollections []string `yaml:"focus_collections"`
 	FocusRequest     []string `yaml:"focus_request"`
 	FocusResponse    []string `yaml:"focus_response"`
+	CycleNext        []string `yaml:"cycle_next"`
+	CyclePrev        []string `yaml:"cycle_prev"`
+	FocusUp          []string `yaml:"focus_up"`
+	FocusDown        []string `yaml:"focus_down"`
 	ToggleEnvs       []string `yaml:"toggle_envs"`
 	ImportCurl       []string `yaml:"import_curl"`
 	ExportCurl       []string `yaml:"export_curl"`
@@ -110,19 +114,23 @@ func DefaultGlobalConfig() *GlobalConfig {
 func DefaultKeyBindings() KeyBindings {
 	return KeyBindings{
 		Quit:             []string{"q"},
-		NavigateLeft:     []string{"h"},
-		NavigateRight:    []string{"l"},
-		NavigateUp:       []string{"k"},
-		NavigateDown:     []string{"j"},
+		NavigateLeft:     []string{"h", "left"},
+		NavigateRight:    []string{"l", "right"},
+		NavigateUp:       []string{"k", "up"},
+		NavigateDown:     []string{"j", "down"},
 		Select:           []string{"enter"},
 		Back:             []string{"esc"},
 		NewRequest:       []string{"n"},
 		SendRequest:      []string{"ctrl+s"},
 		SaveRequest:      []string{"ctrl+w"},
 		DeleteRequest:    []string{"d"},
-		FocusCollections: []string{},
-		FocusRequest:     []string{},
-		FocusResponse:    []string{},
+		FocusCollections: []string{"1"},
+		FocusRequest:     []string{"2"},
+		FocusResponse:    []string{"3"},
+		CycleNext:        []string{"tab"},
+		CyclePrev:        []string{"shift+tab"},
+		FocusUp:          []string{"K", "shift+up"},
+		FocusDown:        []string{"J", "shift+down"},
 		ToggleEnvs:       []string{"e"},
 		ImportCurl:       []string{"ctrl+i"},
 		ExportCurl:       []string{"ctrl+e"},

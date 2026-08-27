@@ -129,10 +129,10 @@ func (l LeftPanel) RenderTabs(width int, active bool, borderColor lipgloss.Color
 	// Render tabs
 	var collectionsTab, envTab string
 	if l.activeTab == CollectionsTab {
-		collectionsTab = activeTabStyle.Render("Collections")
+		collectionsTab = activeTabStyle.Render("1 Collections")
 		envTab = inactiveTabStyle.Render("Envs")
 	} else {
-		collectionsTab = inactiveTabStyle.Render("Collections")
+		collectionsTab = inactiveTabStyle.Render("1 Collections")
 		envTab = activeTabStyle.Render("Envs")
 	}
 
