@@ -692,15 +692,28 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 
 		// Tab navigation - Shift+H/Shift+L (or Shift+Left/Right, or [ / ]) cycle
 		// Params/Auth/Headers/Body/Scripts. Plain h/l are NOT used here - they stay
-		// reserved for whatever the active tab needs them for (Params path/query
-		// section, Auth field cycling, editor cursor movement).
-		switch msg.String() {
-		case "[", "H", "shift+left":
-			r.tabs.Previous()
-			return r, nil
-		case "]", "L", "shift+right":
-			r.tabs.Next()
-			return r, nil
+		// reserved for whatever the active tab needs them for (Auth field cycling,
+		// editor cursor movement). [ / ] are reserved on the Params tab for
+		// switching Path/Query Params instead (same convention as Scripts'
+		// Pre/Post-request section switch below), so they don't cycle tabs there.
+		if r.tabs.GetActive() != "Params" {
+			switch msg.String() {
+			case "[", "H", "shift+left":
+				r.tabs.Previous()
+				return r, nil
+			case "]", "L", "shift+right":
+				r.tabs.Next()
+				return r, nil
+			}
+		} else {
+			switch msg.String() {
+			case "H", "shift+left":
+				r.tabs.Previous()
+				return r, nil
+			case "L", "shift+right":
+				r.tabs.Next()
+				return r, nil
+			}
 		}
 
 		// If in Authorization tab, handle auth-specific keys
@@ -721,16 +734,19 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 			return r, nil
 		}
 
-		// Handle Params tab section switching with h/l when in Params tab
+		// Handle Params tab section switching with [ / ] (same convention as
+		// Scripts' Pre/Post-request switch), not h/l - h/l are needed for
+		// nothing else on this tab today but keeping the convention consistent
+		// avoids the "h/l sometimes cycles tabs, sometimes doesn't" confusion.
 		if r.tabs.GetActive() == "Params" {
 			switch msg.String() {
-			case "h", "left":
+			case "[", "left":
 				// Switch to Path Params section (left)
 				if r.paramsSection != PathParamsSection {
 					r.paramsSection = PathParamsSection
 					return r, nil
 				}
-			case "l", "right":
+			case "]", "right":
 				// Switch to Query Params section (right)
 				if r.paramsSection != QueryParamsSection {
 					r.paramsSection = QueryParamsSection

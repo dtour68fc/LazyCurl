@@ -223,9 +223,13 @@ func (s *StatusBar) View(width int) string {
 	}
 	middleContent := middleStyle.Render(middleText)
 
-	// Join all parts: Mode | Method | Fullscreen | Middle | Env | Status
+	// Join all parts: Mode | Env | Method | Fullscreen | Middle | Status
+	// Env sits fixed right next to Mode (both always rendered, never pushed
+	// around by transient messages/breadcrumb) - hints/message/breadcrumb
+	// live in the flexible middle section next to that fixed cluster.
 	var parts []string
 	parts = append(parts, modeBadge)
+	parts = append(parts, envBadge)
 	if methodBadge != "" {
 		parts = append(parts, methodBadge)
 	}
@@ -233,7 +237,6 @@ func (s *StatusBar) View(width int) string {
 		parts = append(parts, fullscreenBadge)
 	}
 	parts = append(parts, middleContent)
-	parts = append(parts, envBadge)
 	if statusBadge != "" {
 		parts = append(parts, statusBadge)
 	}

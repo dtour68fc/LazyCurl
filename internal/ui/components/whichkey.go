@@ -339,7 +339,7 @@ func (w *WhichKey) initBindings() {
 				{Key: "I", Desc: "Edit URL"},
 				{Key: "Shift+E", Desc: "Edit var"},
 				{Key: "j/k", Desc: "Up/Down"},
-				{Key: "h/l", Desc: "Section"},
+				{Key: "[/]", Desc: "Section"},
 				{Key: "n", Desc: "New param"},
 				{Key: "c/i", Desc: "Edit"},
 				{Key: "d", Desc: "Delete"},
