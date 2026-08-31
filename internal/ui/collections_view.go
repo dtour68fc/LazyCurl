@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -406,8 +407,23 @@ func (c *CollectionsView) DeleteNode(node *components.TreeNode) error {
 
 	switch node.Type {
 	case components.CollectionNode:
-		// Delete the entire collection file
-		// Not implemented for safety - would need to delete the file
+		// Delete the entire collection: remove its file from disk, drop it
+		// from the in-memory list, and rebuild the tree. This used to be a
+		// silent no-op ("not implemented for safety") - the confirm dialog
+		// above (are you sure you want to delete 'X'?) already gates this,
+		// so there's no reason for it to do nothing after you confirm.
+		if col.FilePath != "" {
+			if err := os.Remove(col.FilePath); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+		for i, existing := range c.collections {
+			if existing == col {
+				c.collections = append(c.collections[:i], c.collections[i+1:]...)
+				break
+			}
+		}
+		c.tree = components.NewTree(c.collections)
 		return nil
 	case components.FolderNode:
 		parentPath := c.GetFolderPath(node.Parent)
