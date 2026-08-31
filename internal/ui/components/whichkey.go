@@ -150,6 +150,7 @@ func (w *WhichKey) initBindings() {
 				{Key: "N", Desc: "New Env (+Project)"},
 				{Key: "c/i", Desc: "Edit Value"},
 				{Key: "R", Desc: "Rename"},
+				{Key: "T", Desc: "TLS Settings"},
 				{Key: "d", Desc: "Delete"},
 				{Key: "D", Desc: "Duplicate"},
 			},

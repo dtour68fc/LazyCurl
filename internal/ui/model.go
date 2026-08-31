@@ -75,10 +75,24 @@ func loaderTickCmd() tea.Cmd {
 	})
 }
 
-// SendHTTPRequestCmd creates a command to send an HTTP request
-func SendHTTPRequestCmd(req *api.Request) tea.Cmd {
+// EnvTLSConfig bundles the active environment's TLS settings (custom CA
+// trust and/or client cert for mTLS) so they can be threaded through to
+// SendHTTPRequestCmd without a growing parameter list.
+type EnvTLSConfig struct {
+	CACertPath     string
+	ClientCertPath string
+	ClientKeyPath  string
+}
+
+// SendHTTPRequestCmd creates a command to send an HTTP request, using the
+// active environment's TLS settings (if any) - empty fields mean system
+// trust store only / no client cert, same as before any of this existed.
+func SendHTTPRequestCmd(req *api.Request, tlsCfg EnvTLSConfig) tea.Cmd {
 	return func() tea.Msg {
-		client := api.NewClient()
+		client, err := api.NewClientWithTLSConfig(tlsCfg.CACertPath, tlsCfg.ClientCertPath, tlsCfg.ClientKeyPath)
+		if err != nil {
+			return HTTPResponseMsg{Response: nil, Error: err}
+		}
 		resp, err := client.Send(req)
 		return HTTPResponseMsg{Response: resp, Error: err}
 	}
@@ -1171,7 +1185,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.responsePanel.ClearResponse()
 			m.responsePanel.SetLoading(true)
 			m.statusBar.Info("Resending request...")
-			return m, tea.Batch(SendHTTPRequestCmd(msg.Request), loaderTickCmd())
+			return m, tea.Batch(SendHTTPRequestCmd(msg.Request, m.activeTLSConfig()), loaderTickCmd())
 		}
 		return m, nil
 
@@ -1389,7 +1403,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Now send the actual HTTP request
 		m.statusBar.Info("Sending request...")
-		return m, tea.Batch(SendHTTPRequestCmd(modifiedReq), loaderTickCmd())
+		return m, tea.Batch(SendHTTPRequestCmd(modifiedReq, m.activeTLSConfig()), loaderTickCmd())
 
 	case PostResponseScriptResultMsg:
 		// Post-response script completed
@@ -2598,6 +2612,22 @@ func (m *Model) GetWhichKeyHints() string {
 	return m.whichKey.GetHintsForStatusBar(m.whichKey.GetContext())
 }
 
+// activeTLSConfig returns the TLS settings (custom CA / client cert for
+// mTLS) configured on the currently active environment, if any (zero value
+// = system trust store only, no client cert, the same behavior as before
+// this existed).
+func (m Model) activeTLSConfig() EnvTLSConfig {
+	env := m.leftPanel.GetEnvironments().GetActiveEnvironment()
+	if env == nil {
+		return EnvTLSConfig{}
+	}
+	return EnvTLSConfig{
+		CACertPath:     env.CACertPath,
+		ClientCertPath: env.ClientCertPath,
+		ClientKeyPath:  env.ClientKeyPath,
+	}
+}
+
 // flushPendingRequestEdits persists whatever's currently sitting in the Body
 // and Scripts editors to the collection file on disk. Normally this happens
 // automatically when you press Esc to leave an editor's INSERT mode - but
@@ -2683,7 +2713,7 @@ func (m Model) sendHTTPRequest() (tea.Model, tea.Cmd) {
 
 	// No pre-request script, send request directly
 	m.statusBar.Info("Sending request...")
-	return m, tea.Batch(SendHTTPRequestCmd(req), loaderTickCmd())
+	return m, tea.Batch(SendHTTPRequestCmd(req, m.activeTLSConfig()), loaderTickCmd())
 }
 
 // isDefaultScript checks if a script is the default placeholder script

@@ -82,6 +82,7 @@ type EnvironmentsView struct {
 	newEnvModal *components.Modal
 	editModal   *components.Modal
 	renameModal *components.Modal
+	caCertModal *components.Modal // Sets an EnvNode's custom CA cert path (T)
 	pendingNode *EnvTreeNode // Node being acted upon
 }
 
@@ -116,6 +117,11 @@ func NewEnvironmentsView(workspacePath string) *EnvironmentsView {
 		{Name: "active", Label: "Active", Type: "checkbox"},
 	})
 	ev.renameModal = components.NewInputModal("Rename", "New Name", "", "rename")
+	ev.caCertModal = components.NewFormModal("TLS Settings", "ca_cert", []components.FormField{
+		{Name: "ca", Label: "CA Cert Path", Type: "text", Placeholder: "~/path/to/ca.crt"},
+		{Name: "cert", Label: "Client Cert Path", Type: "text", Placeholder: "for mTLS, if server needs one"},
+		{Name: "key", Label: "Client Key Path", Type: "text", Placeholder: "matching private key"},
+	})
 
 	ev.loadEnvironments()
 
@@ -377,7 +383,8 @@ func (e *EnvironmentsView) hasActiveModal() bool {
 		e.newVarModal.IsVisible() ||
 		e.newEnvModal.IsVisible() ||
 		e.editModal.IsVisible() ||
-		e.renameModal.IsVisible()
+		e.renameModal.IsVisible() ||
+		e.caCertModal.IsVisible()
 }
 
 // IsSearching returns true if search is active
@@ -501,6 +508,15 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 	}
 	if e.renameModal.IsVisible() {
 		e.renameModal, cmd = e.renameModal.Update(msg)
+		if cmd != nil {
+			closeMsg := cmd()
+			if closeMsg, ok := closeMsg.(components.ModalCloseMsg); ok {
+				return e.handleModalClose(closeMsg)
+			}
+		}
+	}
+	if e.caCertModal.IsVisible() {
+		e.caCertModal, cmd = e.caCertModal.Update(msg)
 		if cmd != nil {
 			closeMsg := cmd()
 			if closeMsg, ok := closeMsg.(components.ModalCloseMsg); ok {
@@ -638,6 +654,23 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 					e.renameModal.Title = "Rename Variable"
 				}
 				e.renameModal.Show()
+			}
+
+		case "T":
+			// Set TLS settings for this environment: a custom CA to trust
+			// (talking to a server on a private/self-signed CA, e.g. a local
+			// docker-compose stack's shared certs) and/or a client cert+key
+			// for mTLS (server responds "tls: certificate required" without one)
+			if node := e.getCurrentNode(); node != nil {
+				env := e.getEnvForNode(node)
+				if env != nil {
+					e.pendingNode = node
+					e.caCertModal.SetFieldValue("ca", env.CACertPath)
+					e.caCertModal.SetFieldValue("cert", env.ClientCertPath)
+					e.caCertModal.SetFieldValue("key", env.ClientKeyPath)
+					e.caCertModal.Title = "TLS Settings: " + env.Name
+					e.caCertModal.Show()
+				}
 			}
 
 		case "d":
@@ -910,6 +943,20 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 				}
 				e.buildTree()
 				e.refresh()
+			}
+		}
+
+	case "ca_cert":
+		if e.pendingNode != nil {
+			env := e.getEnvForNode(e.pendingNode)
+			if env != nil {
+				ca, _ := msg.Result.Values["ca"].(string)
+				cert, _ := msg.Result.Values["cert"].(string)
+				key, _ := msg.Result.Values["key"].(string)
+				env.CACertPath = strings.TrimSpace(ca)
+				env.ClientCertPath = strings.TrimSpace(cert)
+				env.ClientKeyPath = strings.TrimSpace(key)
+				_ = e.saveEnvironment(env) // Error intentionally ignored for UI responsiveness
 			}
 		}
 
@@ -1254,6 +1301,9 @@ func (e *EnvironmentsView) RenderModal(screenWidth, screenHeight int) string {
 	}
 	if e.renameModal.IsVisible() {
 		return e.renameModal.View(screenWidth, screenHeight)
+	}
+	if e.caCertModal.IsVisible() {
+		return e.caCertModal.View(screenWidth, screenHeight)
 	}
 	return ""
 }

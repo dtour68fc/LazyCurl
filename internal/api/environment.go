@@ -17,11 +17,14 @@ type EnvironmentVariable struct {
 
 // EnvironmentFile represents an environment configuration file
 type EnvironmentFile struct {
-	Name        string                          `json:"name"`
-	Description string                          `json:"description,omitempty"`
-	Project     string                          `json:"project,omitempty"` // Groups environments under a project (e.g. "PMC", "PMV")
-	Variables   map[string]*EnvironmentVariable `json:"variables"`
-	FilePath    string                          `json:"-"` // Internal: path to the file
+	Name           string                          `json:"name"`
+	Description    string                          `json:"description,omitempty"`
+	Project        string                          `json:"project,omitempty"`         // Groups environments under a project (e.g. "PMC", "PMV")
+	CACertPath     string                          `json:"ca_cert_path,omitempty"`     // Custom CA bundle for this environment's requests, supports ~ expansion
+	ClientCertPath string                          `json:"client_cert_path,omitempty"` // Client cert for mutual TLS (mTLS), if the server requires one
+	ClientKeyPath  string                          `json:"client_key_path,omitempty"`  // Matching private key for ClientCertPath
+	Variables      map[string]*EnvironmentVariable `json:"variables"`
+	FilePath       string                          `json:"-"` // Internal: path to the file
 }
 
 // LoadEnvironment loads an environment from a JSON file
@@ -34,21 +37,27 @@ func LoadEnvironment(path string) (*EnvironmentFile, error) {
 
 	// First, check if this is legacy format by examining the raw JSON structure
 	var rawEnv struct {
-		Name        string                     `json:"name"`
-		Description string                     `json:"description,omitempty"`
-		Project     string                     `json:"project,omitempty"`
-		Variables   map[string]json.RawMessage `json:"variables"`
+		Name           string                     `json:"name"`
+		Description    string                     `json:"description,omitempty"`
+		Project        string                     `json:"project,omitempty"`
+		CACertPath     string                     `json:"ca_cert_path,omitempty"`
+		ClientCertPath string                     `json:"client_cert_path,omitempty"`
+		ClientKeyPath  string                     `json:"client_key_path,omitempty"`
+		Variables      map[string]json.RawMessage `json:"variables"`
 	}
 	if err := json.Unmarshal(data, &rawEnv); err != nil {
 		return nil, fmt.Errorf("failed to parse environment JSON: %w", err)
 	}
 
 	env := &EnvironmentFile{
-		Name:        rawEnv.Name,
-		Description: rawEnv.Description,
-		Project:     rawEnv.Project,
-		Variables:   make(map[string]*EnvironmentVariable),
-		FilePath:    path,
+		Name:           rawEnv.Name,
+		Description:    rawEnv.Description,
+		Project:        rawEnv.Project,
+		CACertPath:     rawEnv.CACertPath,
+		ClientCertPath: rawEnv.ClientCertPath,
+		ClientKeyPath:  rawEnv.ClientKeyPath,
+		Variables:      make(map[string]*EnvironmentVariable),
+		FilePath:       path,
 	}
 
 	// Parse each variable, handling both legacy (string) and new (object) formats
@@ -249,11 +258,14 @@ func ValidateEnvironment(env *EnvironmentFile) error {
 // Clone creates a deep copy of the environment
 func (e *EnvironmentFile) Clone() *EnvironmentFile {
 	clone := &EnvironmentFile{
-		Name:        e.Name,
-		Description: e.Description,
-		Project:     e.Project,
-		FilePath:    e.FilePath,
-		Variables:   make(map[string]*EnvironmentVariable),
+		Name:           e.Name,
+		Description:    e.Description,
+		Project:        e.Project,
+		CACertPath:     e.CACertPath,
+		ClientCertPath: e.ClientCertPath,
+		ClientKeyPath:  e.ClientKeyPath,
+		FilePath:       e.FilePath,
+		Variables:      make(map[string]*EnvironmentVariable),
 	}
 
 	for k, v := range e.Variables {
