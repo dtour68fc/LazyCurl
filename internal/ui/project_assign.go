@@ -37,3 +37,31 @@ func (m Model) handleProjectAssignModalClose(msg components.ModalCloseMsg) (tea.
 
 	return m, nil
 }
+
+// handleNewProjectModalClose creates a brand-new (empty) collection tagged
+// with the given project, bootstrapping a project from scratch when there
+// was nothing to press "P" on yet.
+func (m Model) handleNewProjectModalClose(msg components.ModalCloseMsg) (tea.Model, tea.Cmd) {
+	m.newProjectModal.Hide()
+	if !msg.Result.Confirmed {
+		return m, nil
+	}
+
+	project, _ := msg.Result.Values["project"].(string)
+	name, _ := msg.Result.Values["name"].(string)
+
+	coll, err := m.leftPanel.GetCollections().CreateEmptyCollection(name, project)
+	if err != nil {
+		m.statusBar.Error(err)
+		return m, nil
+	}
+
+	if project == "" {
+		m.statusBar.Success("Collection", "created "+coll.Name)
+	} else {
+		m.statusBar.Success("Project", "created "+coll.Name+" in "+project)
+		m.leftPanel.GetEnvironments().SwitchToProject(project)
+	}
+
+	return m, nil
+}

@@ -143,6 +143,27 @@ func (e *ScriptEnvironment) Has(name string) bool {
 	return false
 }
 
+// GetAll returns every variable as a plain map, with any pending changes
+// from this script run already applied on top of the original environment.
+func (e *ScriptEnvironment) GetAll() map[string]string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	result := make(map[string]string)
+	if e.env != nil && e.env.Variables != nil {
+		for k, v := range e.env.Variables {
+			result[k] = v
+		}
+	}
+	for _, c := range e.changes {
+		if c.Type == EnvChangeUnset {
+			delete(result, c.Name)
+		} else {
+			result[c.Name] = c.Value
+		}
+	}
+	return result
+}
+
 // GetChanges returns all environment variable modifications
 func (e *ScriptEnvironment) GetChanges() []EnvChange {
 	e.mu.Lock()

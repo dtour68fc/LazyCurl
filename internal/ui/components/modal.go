@@ -273,13 +273,17 @@ func (m *Modal) Update(msg tea.Msg) (*Modal, tea.Cmd) {
 			}
 
 		case " ":
-			// Toggle checkbox
+			// Toggle checkbox - or type a literal space into a text field
+			// (this was silently swallowing spaces in every text field before,
+			// e.g. "PMX API" would land as "PMXAPI")
 			if m.FocusIndex < len(m.Fields) && m.Fields[m.FocusIndex].Type == "checkbox" {
 				if m.Fields[m.FocusIndex].Value == "true" {
 					m.Fields[m.FocusIndex].Value = "false"
 				} else {
 					m.Fields[m.FocusIndex].Value = "true"
 				}
+			} else if m.FocusIndex < len(m.Fields) && m.Fields[m.FocusIndex].Type == "text" {
+				m.insertCharAtCursor(m.FocusIndex, " ")
 			}
 
 		case "backspace":

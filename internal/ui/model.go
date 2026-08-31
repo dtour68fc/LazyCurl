@@ -199,6 +199,11 @@ type Model struct {
 	projectAssignModal *components.Modal
 	pendingProjectColl *api.CollectionFile
 
+	// New-project modal (P with nothing selected - bootstraps a fresh
+	// project + collection from scratch, since there's no existing
+	// collection node to assign a project onto yet)
+	newProjectModal *components.Modal
+
 	// External editor state
 	externalEditorActive bool              // Whether external editor is currently open
 	externalEditorInfo   *api.TempFileInfo // Temp file info for cleanup
@@ -297,6 +302,10 @@ func NewModel(globalConfig *config.GlobalConfig, workspaceConfig *config.Workspa
 			{Name: "active", Label: "Active", Type: "checkbox", Value: "true"},
 		}),
 		projectAssignModal: components.NewInputModal("Assign Project", "Project name", "e.g. PMC, PMV", "assign_project"),
+		newProjectModal: components.NewFormModal("New Project", "new_project", []components.FormField{
+			{Name: "project", Label: "Project", Type: "text", Placeholder: "e.g. PMC, PMV"},
+			{Name: "name", Label: "Collection Name", Type: "text", Placeholder: "e.g. PMC (API)"},
+		}),
 	}
 }
 
@@ -369,6 +378,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				if closeMsg, ok := cmd().(components.ModalCloseMsg); ok {
 					return m.handleProjectAssignModalClose(closeMsg)
+				}
+			}
+		}
+		return m, nil
+	}
+
+	// Handle new-project modal input if visible (P with nothing selected)
+	if m.newProjectModal.IsVisible() {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			var cmd tea.Cmd
+			m.newProjectModal, cmd = m.newProjectModal.Update(keyMsg)
+			if cmd != nil {
+				if closeMsg, ok := cmd().(components.ModalCloseMsg); ok {
+					return m.handleNewProjectModalClose(closeMsg)
 				}
 			}
 		}
@@ -723,11 +746,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// P on a Collections node assigns/edits which Project that whole
-			// collection belongs to, for environment auto-switching (selecting
-			// a request from a PMC-project collection activates a PMC
-			// environment automatically, same for PMV, etc)
-			if m.activePanel == CollectionsPanel && msg.String() == "P" {
+			// p (lowercase) on a Collections node assigns/edits which Project
+			// that whole collection belongs to, for environment auto-switching
+			// (selecting a request from a PMC-project collection activates a
+			// PMC environment automatically, same for PMV, etc). Only takes
+			// over when there's nothing to paste - if the clipboard has
+			// something, p keeps its normal job (paste), handled further down
+			// by the tree component itself. Scoped to the Collections tab
+			// specifically - the Environments tab also lives under
+			// activePanel==CollectionsPanel and has its own meaning for keys.
+			if m.activePanel == CollectionsPanel && m.leftPanel.GetActiveTab() == CollectionsTab &&
+				msg.String() == "p" && m.leftPanel.GetCollections().GetClipboard() == nil {
 				if selected := m.leftPanel.GetCollections().Selected(); selected != nil {
 					if coll := m.leftPanel.GetCollections().FindCollectionByNode(selected); coll != nil {
 						m.pendingProjectColl = coll
@@ -736,6 +765,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.projectAssignModal.Show()
 					}
 				}
+				return m, nil
+			}
+
+			// P (uppercase) always creates a brand new project + collection
+			// from scratch, regardless of what's selected. Scoped to the
+			// Collections tab, same reasoning as p above.
+			if m.activePanel == CollectionsPanel && m.leftPanel.GetActiveTab() == CollectionsTab && msg.String() == "P" {
+				m.newProjectModal.SetFieldValue("project", "")
+				m.newProjectModal.SetFieldValue("name", "")
+				m.newProjectModal.Show()
 				return m, nil
 			}
 
@@ -1837,6 +1876,12 @@ func (m Model) View() string {
 	if m.projectAssignModal.IsVisible() {
 		projView := m.projectAssignModal.View(m.width, m.height)
 		result = m.overlayDialog(result, projView)
+	}
+
+	// Overlay new-project modal if visible
+	if m.newProjectModal.IsVisible() {
+		newProjView := m.newProjectModal.View(m.width, m.height)
+		result = m.overlayDialog(result, newProjView)
 	}
 
 	return result

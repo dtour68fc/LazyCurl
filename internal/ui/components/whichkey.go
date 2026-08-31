@@ -100,8 +100,9 @@ func (w *WhichKey) initBindings() {
 		{
 			Name: "Actions",
 			Bindings: []KeyBinding{
-				{Key: "P", Desc: "Assign project"},
+				{Key: "p", Desc: "Assign project"},
 				{Key: "n", Desc: "New Request"},
+				{Key: "P", Desc: "New Project"},
 				{Key: "N", Desc: "New Folder"},
 				{Key: "c/i", Desc: "Edit"},
 				{Key: "R", Desc: "Rename"},

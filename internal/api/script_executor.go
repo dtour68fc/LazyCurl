@@ -663,7 +663,20 @@ func (e *gojaExecutor) setupLCEnvironment(vm *goja.Runtime, lc *goja.Object, env
 		return vm.ToValue(env.Has(name))
 	})
 
+	envObj.Set("toObject", func(call goja.FunctionCall) goja.Value {
+		obj := vm.NewObject()
+		for k, v := range env.GetAll() {
+			_ = obj.Set(k, v)
+		}
+		return obj
+	})
+
 	lc.Set("environment", envObj)
+	// The documented/scripting-API name is `lc.env` (see docs/api/env.md) -
+	// `lc.environment` was the only thing actually wired up here, so every
+	// `lc.env.get/set/unset/has/toObject()` call from any script anyone
+	// wrote against the docs was silently undefined. Alias both names.
+	lc.Set("env", envObj)
 	return nil
 }
 
@@ -715,6 +728,14 @@ func (e *gojaExecutor) setupLCGlobals(vm *goja.Runtime, lc *goja.Object) error {
 	globalsObj.Set("clear", func(call goja.FunctionCall) goja.Value {
 		e.globals.Clear()
 		return goja.Undefined()
+	})
+
+	globalsObj.Set("toObject", func(call goja.FunctionCall) goja.Value {
+		obj := vm.NewObject()
+		for k, v := range e.globals.All() {
+			_ = obj.Set(k, v)
+		}
+		return obj
 	})
 
 	lc.Set("globals", globalsObj)

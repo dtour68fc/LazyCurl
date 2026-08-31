@@ -2,6 +2,7 @@ package ui
 
 import (
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -228,6 +229,33 @@ func (c *CollectionsView) createDefaultCollectionWithRequest(name, method, url s
 
 	col.AddRequest(req)
 	return col.Save()
+}
+
+// CreateEmptyCollection creates a brand-new, empty collection - optionally
+// tagged with a Project - and adds it to the tree. This is the entry point
+// for bootstrapping a project from scratch (e.g. pressing P in the
+// Collections panel with nothing selected yet, since there's no existing
+// collection node to assign a project onto).
+func (c *CollectionsView) CreateEmptyCollection(name, project string) (*api.CollectionFile, error) {
+	if name == "" {
+		name = "New Collection"
+	}
+	filename := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+	if filename == "" {
+		filename = "collection"
+	}
+	col := &api.CollectionFile{
+		Name:     name,
+		Project:  project,
+		Requests: []api.CollectionRequest{},
+		Folders:  []api.Folder{},
+		FilePath: filepath.Join(c.collectionsPath, filename+".json"),
+	}
+	if err := col.Save(); err != nil {
+		return nil, err
+	}
+	c.ReloadCollections()
+	return col, nil
 }
 
 // AddFolderToCollection adds a new folder to the appropriate collection

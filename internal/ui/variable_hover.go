@@ -71,6 +71,8 @@ func findFirstVariable(s string) (string, bool) {
 // focused:
 //   - editing the URL: uses the real cursor position in the URL string
 //   - Body tab (JSON editor): uses the editor's real cursor position
+//   - Authorization tab: uses whichever field is currently focused
+//     (Token/Prefix/Username/Password/API Key name or value)
 //   - Headers/Params tabs: no sub-cursor exists in a table row, so it takes
 //     the first {{var}} found in the currently selected row's value
 func (m *Model) findHoveredVariable() (string, bool) {
@@ -87,6 +89,28 @@ func (m *Model) findHoveredVariable() (string, bool) {
 			return findVariableAtCursor(lines[row], col)
 		}
 		return "", false
+	}
+
+	// Authorization tab doesn't use a table like Headers/Params - it has its
+	// own bespoke fields (Type/Token/Prefix/Username/etc), tracked via
+	// r.authField. Check whichever one is currently focused.
+	if r.tabs.GetActive() == "Authorization" {
+		var val string
+		switch r.authField {
+		case AuthFieldToken:
+			val = r.authToken
+		case AuthFieldPrefix:
+			val = r.authPrefix
+		case AuthFieldUsername:
+			val = r.authUsername
+		case AuthFieldPassword:
+			val = r.authPassword
+		case AuthFieldAPIKeyName:
+			val = r.authAPIKeyName
+		case AuthFieldAPIKeyValue:
+			val = r.authAPIKeyValue
+		}
+		return findFirstVariable(val)
 	}
 
 	if table := r.getCurrentTable(); table != nil {
