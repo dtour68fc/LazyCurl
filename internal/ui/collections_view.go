@@ -130,6 +130,45 @@ func (c *CollectionsView) GetCollections() []*api.CollectionFile {
 	return c.collections
 }
 
+// HasProject returns true if any collection is tagged with the given project.
+func (c *CollectionsView) HasProject(project string) bool {
+	if project == "" {
+		return false
+	}
+	for _, col := range c.collections {
+		if col.Project == project {
+			return true
+		}
+	}
+	return false
+}
+
+// DeleteCollectionsForProject removes every collection file tagged with the
+// given project (used when a project is deleted from the Environments side -
+// deleting "the project" should remove it from Collections too, not leave a
+// same-named collection behind with no environment left to switch to).
+// Returns the number of collections removed.
+func (c *CollectionsView) DeleteCollectionsForProject(project string) int {
+	if project == "" {
+		return 0
+	}
+	removed := 0
+	var remaining []*api.CollectionFile
+	for _, col := range c.collections {
+		if col.Project != project {
+			remaining = append(remaining, col)
+			continue
+		}
+		if col.FilePath != "" {
+			_ = os.Remove(col.FilePath) // Error intentionally ignored for UI responsiveness
+		}
+		removed++
+	}
+	c.collections = remaining
+	c.tree = components.NewTree(c.collections)
+	return removed
+}
+
 // FindCollectionByNode finds the collection that contains a tree node
 func (c *CollectionsView) FindCollectionByNode(node *components.TreeNode) *api.CollectionFile {
 	if node == nil {

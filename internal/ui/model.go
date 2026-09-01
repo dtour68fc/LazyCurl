@@ -414,8 +414,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle environment modal input first if visible
 	if m.leftPanel.GetEnvironments().HasActiveModal() {
-		*m.leftPanel.GetEnvironments(), _ = m.leftPanel.GetEnvironments().Update(msg, m.globalConfig)
-		return m, nil
+		var cmd tea.Cmd
+		*m.leftPanel.GetEnvironments(), cmd = m.leftPanel.GetEnvironments().Update(msg, m.globalConfig)
+		return m, cmd
 	}
 
 	// Handle dialog input first if visible
@@ -1005,6 +1006,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case EnvDeleteBlockedMsg:
 		m.statusBar.Info(msg.Reason)
+		return m, nil
+
+	case ProjectDeletedMsg:
+		// A project was deleted from the Envs side - cascade to Collections
+		// too, same project either way.
+		if n := m.leftPanel.GetCollections().DeleteCollectionsForProject(msg.Project); n > 0 {
+			plural := "collection"
+			if n != 1 {
+				plural = "collections"
+			}
+			m.statusBar.Success("Deleted", fmt.Sprintf("project %s (removed %d %s too)", msg.Project, n, plural))
+		}
 		return m, nil
 
 	case components.TreeNewRequestMsg:

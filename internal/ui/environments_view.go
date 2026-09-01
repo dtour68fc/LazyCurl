@@ -36,6 +36,15 @@ type EnvDeleteBlockedMsg struct {
 	Reason string
 }
 
+// ProjectDeletedMsg is sent after a ProjectNode delete actually goes
+// through (all of its environments removed). Model uses this to cascade
+// the deletion to the Collections side too - deleting "the project" from
+// either tab should delete it from both, not leave a same-named collection
+// behind with no environments to switch to.
+type ProjectDeletedMsg struct {
+	Project string
+}
+
 // EnvTreeNode represents a node in the environment tree
 type EnvTreeNode struct {
 	Name     string
@@ -993,11 +1002,15 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 	switch msg.Tag {
 	case "delete":
 		if e.pendingNode != nil {
+			deletedProject := ""
 			switch e.pendingNode.Type {
 			case ProjectNode:
 				// Delete every environment file grouped under this project.
 				project := e.pendingNode.Name
 				e.DeleteEnvironmentsForProject(project)
+				if project != UngroupedProject {
+					deletedProject = project
+				}
 			case EnvNode:
 				// Delete environment file from disk
 				if e.pendingNode.EnvFile.FilePath != "" {
@@ -1030,6 +1043,14 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 			}
 			e.buildTree()
 			e.refresh()
+			if deletedProject != "" {
+				// Deleting a project from the Envs side should delete it
+				// from the Collections side too - it's the same "project",
+				// just viewed from the other tab. Signal Model to cascade.
+				return e, func() tea.Msg {
+					return ProjectDeletedMsg{Project: deletedProject}
+				}
+			}
 		}
 
 	case "edit":
