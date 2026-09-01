@@ -391,6 +391,45 @@ func (e *EnvironmentsView) HasEnvironmentInProject(project string) bool {
 	return false
 }
 
+// DeleteEnvironmentsForProject removes every environment file tagged with
+// the given project (accepts either the raw project name or the
+// UngroupedProject sentinel used by the tree UI). Used both by deleting a
+// ProjectNode directly in the Envs tab, and by deleting the last collection
+// tagged with a project in the Collections tab - either action "deletes the
+// project", so both should cascade to its environments. Returns the number
+// of environments removed.
+func (e *EnvironmentsView) DeleteEnvironmentsForProject(project string) int {
+	if project == UngroupedProject {
+		project = ""
+	}
+	removed := 0
+	var remaining []*api.EnvironmentFile
+	for _, env := range e.environments {
+		if env.Project != project {
+			remaining = append(remaining, env)
+			continue
+		}
+		if env.FilePath != "" {
+			_ = os.Remove(env.FilePath) // Error intentionally ignored for UI responsiveness
+		}
+		if e.activeEnvPath == env.FilePath {
+			e.activeEnvName = ""
+			e.activeEnvPath = ""
+		}
+		removed++
+	}
+	e.environments = remaining
+	delete(e.activeEnvByProj, project)
+	// Set first remaining environment as active if none selected
+	if e.activeEnvName == "" && len(e.environments) > 0 {
+		e.activeEnvName = e.environments[0].Name
+		e.rememberActive(e.environments[0])
+	}
+	e.buildTree()
+	e.refresh()
+	return removed
+}
+
 // CreateEnvironment creates and persists a new environment, mirroring the
 // "new_env" modal flow, and refreshes the tree. Returns the created
 // environment, or nil if name is empty.
@@ -914,30 +953,7 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 			case ProjectNode:
 				// Delete every environment file grouped under this project.
 				project := e.pendingNode.Name
-				if project == UngroupedProject {
-					project = ""
-				}
-				var remaining []*api.EnvironmentFile
-				for _, env := range e.environments {
-					if env.Project != project {
-						remaining = append(remaining, env)
-						continue
-					}
-					if env.FilePath != "" {
-						_ = os.Remove(env.FilePath) // Error intentionally ignored for UI responsiveness
-					}
-					if e.activeEnvPath == env.FilePath {
-						e.activeEnvName = ""
-						e.activeEnvPath = ""
-					}
-				}
-				e.environments = remaining
-				delete(e.activeEnvByProj, project)
-				// Set first remaining environment as active if none selected
-				if e.activeEnvName == "" && len(e.environments) > 0 {
-					e.activeEnvName = e.environments[0].Name
-					e.rememberActive(e.environments[0])
-				}
+				e.DeleteEnvironmentsForProject(project)
 			case EnvNode:
 				// Delete environment file from disk
 				if e.pendingNode.EnvFile.FilePath != "" {

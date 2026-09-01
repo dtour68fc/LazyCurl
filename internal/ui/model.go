@@ -2369,13 +2369,47 @@ func (m *Model) performDelete(node *components.TreeNode) {
 		return
 	}
 
+	// If we're deleting a whole collection that's tagged with a project,
+	// remember the project before it's gone so we can check afterward
+	// whether it was the last collection for that project.
+	var project string
+	if node.Type == components.CollectionNode {
+		if col := m.leftPanel.GetCollections().FindCollectionByNode(node); col != nil {
+			project = col.Project
+		}
+	}
+
 	if err := m.leftPanel.GetCollections().DeleteNode(node); err != nil {
 		m.statusBar.Error(err)
 		return
 	}
 
-	m.statusBar.Success("Deleted", node.Name)
 	m.leftPanel.GetCollections().ReloadCollections()
+
+	if project != "" {
+		stillHasCollection := false
+		for _, col := range m.leftPanel.GetCollections().GetCollections() {
+			if col.Project == project {
+				stillHasCollection = true
+				break
+			}
+		}
+		if !stillHasCollection {
+			// Deleting the last collection for a project deletes the
+			// project from the user's perspective, so cascade to its
+			// environments too rather than leaving them orphaned.
+			if n := m.leftPanel.GetEnvironments().DeleteEnvironmentsForProject(project); n > 0 {
+				plural := "environment"
+				if n != 1 {
+					plural = "environments"
+				}
+				m.statusBar.Success("Deleted", fmt.Sprintf("%s (last collection in project %s, removed %d %s)", node.Name, project, n, plural))
+				return
+			}
+		}
+	}
+
+	m.statusBar.Success("Deleted", node.Name)
 }
 
 // performNewRequest creates a new request
