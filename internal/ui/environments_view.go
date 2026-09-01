@@ -29,6 +29,13 @@ const (
 // set (legacy environments created before project grouping existed).
 const UngroupedProject = "Ungrouped"
 
+// EnvDeleteBlockedMsg is sent when a delete was refused rather than
+// showing the confirm modal (e.g. trying to delete the last remaining
+// environment of a project that's still linked to a collection).
+type EnvDeleteBlockedMsg struct {
+	Reason string
+}
+
 // EnvTreeNode represents a node in the environment tree
 type EnvTreeNode struct {
 	Name     string
@@ -770,6 +777,28 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 					e.deleteModal.Message = fmt.Sprintf("Delete project '%s' and its %d %s? This cannot be undone.", node.Name, count, plural)
 					e.deleteModal.Show()
 				case EnvNode:
+					// Refuse to delete the last environment of a project
+					// that's still active - that would silently orphan the
+					// project with zero environments. Deleting the whole
+					// project (ProjectNode) is the explicit way to do that.
+					project := node.EnvFile.Project
+					if project != "" {
+						count := 0
+						for _, env := range e.environments {
+							if env.Project == project {
+								count++
+							}
+						}
+						active := e.GetActiveEnvironment()
+						if count <= 1 && active != nil && active.Project == project {
+							e.pendingNode = nil
+							return e, func() tea.Msg {
+								return EnvDeleteBlockedMsg{
+									Reason: "Can't delete '" + node.Name + "' - it's the only environment left in the active project '" + project + "'. Delete the project instead.",
+								}
+							}
+						}
+					}
 					e.deleteModal.Message = "Delete environment: " + node.Name + "?"
 					e.deleteModal.Show()
 				case VarNode:

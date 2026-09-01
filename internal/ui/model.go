@@ -1003,6 +1003,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case EnvDeleteBlockedMsg:
+		m.statusBar.Info(msg.Reason)
+		return m, nil
+
 	case components.TreeNewRequestMsg:
 		// Handle new request creation - show new request dialog
 		m.dialog.ShowNewRequest("new_request", msg.ParentNode)
