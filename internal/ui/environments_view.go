@@ -714,8 +714,22 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 				e.pendingNode = node
 				switch node.Type {
 				case ProjectNode:
-					// Deleting a whole project isn't supported yet - it spans
-					// multiple environment files. No-op rather than crash.
+					count := 0
+					for _, env := range e.environments {
+						envProject := env.Project
+						if envProject == "" {
+							envProject = UngroupedProject
+						}
+						if envProject == node.Name {
+							count++
+						}
+					}
+					plural := "environment"
+					if count != 1 {
+						plural = "environments"
+					}
+					e.deleteModal.Message = fmt.Sprintf("Delete project '%s' and its %d %s? This cannot be undone.", node.Name, count, plural)
+					e.deleteModal.Show()
 				case EnvNode:
 					e.deleteModal.Message = "Delete environment: " + node.Name + "?"
 					e.deleteModal.Show()
@@ -896,7 +910,35 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 	switch msg.Tag {
 	case "delete":
 		if e.pendingNode != nil {
-			if e.pendingNode.Type == EnvNode {
+			switch e.pendingNode.Type {
+			case ProjectNode:
+				// Delete every environment file grouped under this project.
+				project := e.pendingNode.Name
+				if project == UngroupedProject {
+					project = ""
+				}
+				var remaining []*api.EnvironmentFile
+				for _, env := range e.environments {
+					if env.Project != project {
+						remaining = append(remaining, env)
+						continue
+					}
+					if env.FilePath != "" {
+						_ = os.Remove(env.FilePath) // Error intentionally ignored for UI responsiveness
+					}
+					if e.activeEnvPath == env.FilePath {
+						e.activeEnvName = ""
+						e.activeEnvPath = ""
+					}
+				}
+				e.environments = remaining
+				delete(e.activeEnvByProj, project)
+				// Set first remaining environment as active if none selected
+				if e.activeEnvName == "" && len(e.environments) > 0 {
+					e.activeEnvName = e.environments[0].Name
+					e.rememberActive(e.environments[0])
+				}
+			case EnvNode:
 				// Delete environment file from disk
 				if e.pendingNode.EnvFile.FilePath != "" {
 					_ = os.Remove(e.pendingNode.EnvFile.FilePath)
@@ -918,7 +960,7 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 					e.activeEnvName = e.environments[0].Name
 					e.rememberActive(e.environments[0])
 				}
-			} else {
+			default:
 				// Delete variable
 				env := e.getEnvForNode(e.pendingNode)
 				if env != nil {
