@@ -2400,13 +2400,13 @@ func (m *Model) performDelete(node *components.TreeNode) {
 		}
 		if !stillHasCollection {
 			envs := m.leftPanel.GetEnvironments()
-			if envs.IsLastEnvironmentOfActiveProject(project) {
-				// The project's only remaining environment is the one
-				// currently active - deleting its last collection must not
-				// silently wipe that out too. Leave the environment behind;
-				// the project just has no collections until a new one is
-				// created or the project is explicitly deleted.
-				m.statusBar.Success("Deleted", fmt.Sprintf("%s (kept the active environment for project %s)", node.Name, project))
+			if envs.IsLastEnvironmentOfLinkedProject(project) {
+				// This was the project's only remaining environment -
+				// deleting its last collection must not silently wipe that
+				// out too. Leave the environment behind; the project just
+				// has no collections until a new one is created or the
+				// project is explicitly deleted.
+				m.statusBar.Success("Deleted", fmt.Sprintf("%s (kept %s's last environment)", node.Name, project))
 				return
 			}
 			// Deleting the last collection for a project deletes the

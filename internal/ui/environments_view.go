@@ -398,13 +398,18 @@ func (e *EnvironmentsView) HasEnvironmentInProject(project string) bool {
 	return false
 }
 
-// IsLastEnvironmentOfActiveProject returns true if the given project has
-// exactly one remaining environment and that environment is the currently
-// active one. Used to guard against silently zeroing out the environments
-// of a project you're actively using - both from the direct EnvNode delete
-// key, and from cascading deletes triggered elsewhere (e.g. deleting the
-// last collection tagged with that project).
-func (e *EnvironmentsView) IsLastEnvironmentOfActiveProject(project string) bool {
+// IsLastEnvironmentOfLinkedProject returns true if the given project (any
+// project besides Ungrouped) has exactly one remaining environment. Used to
+// guard against silently zeroing out the environments of a real project -
+// both from the direct EnvNode delete key, and from cascading deletes
+// triggered elsewhere (e.g. deleting the last collection tagged with that
+// project). Deliberately does NOT require the project to be the currently
+// "active" one in the session - that bookkeeping isn't reliably set (e.g.
+// environments created via the Envs tab's own "N" are never auto-activated),
+// so it was silently letting the guard get bypassed. A project's last
+// environment is now protected unconditionally; the explicit escape hatch
+// is deleting the whole project (ProjectNode, "d" on the project row).
+func (e *EnvironmentsView) IsLastEnvironmentOfLinkedProject(project string) bool {
 	if project == "" {
 		return false
 	}
@@ -414,11 +419,7 @@ func (e *EnvironmentsView) IsLastEnvironmentOfActiveProject(project string) bool
 			count++
 		}
 	}
-	if count != 1 {
-		return false
-	}
-	active := e.GetActiveEnvironment()
-	return active != nil && active.Project == project
+	return count == 1
 }
 
 // DeleteEnvironmentsForProject removes every environment file tagged with
@@ -800,16 +801,16 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 					e.deleteModal.Message = fmt.Sprintf("Delete project '%s' and its %d %s? This cannot be undone.", node.Name, count, plural)
 					e.deleteModal.Show()
 				case EnvNode:
-					// Refuse to delete the last environment of a project
-					// that's still active - that would silently orphan the
-					// project with zero environments. Deleting the whole
-					// project (ProjectNode) is the explicit way to do that.
+					// Refuse to delete the last environment of a real
+					// project - that would silently orphan it with zero
+					// environments. Deleting the whole project
+					// (ProjectNode) is the explicit way to do that.
 					project := node.EnvFile.Project
-					if e.IsLastEnvironmentOfActiveProject(project) {
+					if e.IsLastEnvironmentOfLinkedProject(project) {
 						e.pendingNode = nil
 						return e, func() tea.Msg {
 							return EnvDeleteBlockedMsg{
-								Reason: "Can't delete '" + node.Name + "' - it's the only environment left in the active project '" + project + "'. Delete the project instead.",
+								Reason: "Can't delete '" + node.Name + "' - it's the only environment left in project '" + project + "'. Delete the project instead.",
 							}
 						}
 					}
