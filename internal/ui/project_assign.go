@@ -58,10 +58,17 @@ func (m Model) handleNewProjectModalClose(msg components.ModalCloseMsg) (tea.Mod
 
 	if project == "" {
 		m.statusBar.Success("Collection", "created "+coll.Name)
-	} else {
-		m.statusBar.Success("Project", "created "+coll.Name+" in "+project)
-		m.leftPanel.GetEnvironments().SwitchToProject(project)
+		return m, nil
 	}
+
+	envs := m.leftPanel.GetEnvironments()
+	if !envs.HasEnvironmentInProject(project) {
+		// Brand-new project with nothing to switch to yet - bootstrap a
+		// default environment so it isn't left env-less.
+		envs.CreateEnvironment("Localhost", "", project)
+	}
+	envs.SwitchToProject(project)
+	m.statusBar.Success("Project", "created "+coll.Name+" in "+project)
 
 	return m, nil
 }

@@ -377,6 +377,41 @@ func (e *EnvironmentsView) saveEnvironment(env *api.EnvironmentFile) error {
 	return api.SaveEnvironment(env, env.FilePath)
 }
 
+// HasEnvironmentInProject returns true if any environment is already
+// tagged with the given project.
+func (e *EnvironmentsView) HasEnvironmentInProject(project string) bool {
+	if project == "" {
+		return false
+	}
+	for _, env := range e.environments {
+		if env.Project == project {
+			return true
+		}
+	}
+	return false
+}
+
+// CreateEnvironment creates and persists a new environment, mirroring the
+// "new_env" modal flow, and refreshes the tree. Returns the created
+// environment, or nil if name is empty.
+func (e *EnvironmentsView) CreateEnvironment(name, description, project string) *api.EnvironmentFile {
+	if name == "" {
+		return nil
+	}
+	newEnv := &api.EnvironmentFile{
+		Name:        name,
+		Description: description,
+		Project:     project,
+		Variables:   make(map[string]*api.EnvironmentVariable),
+	}
+	e.environments = append(e.environments, newEnv)
+	_ = e.saveEnvironment(newEnv) // Error intentionally ignored for UI responsiveness
+	e.buildTree()
+	e.refresh()
+	return newEnv
+}
+
+
 // hasActiveModal returns true if any modal is visible
 func (e *EnvironmentsView) hasActiveModal() bool {
 	return e.deleteModal.IsVisible() ||
@@ -994,18 +1029,7 @@ func (e EnvironmentsView) handleModalClose(msg components.ModalCloseMsg) (Enviro
 			project = strings.TrimSpace(p)
 		}
 
-		if name != "" {
-			newEnv := &api.EnvironmentFile{
-				Name:        name,
-				Description: desc,
-				Project:     project,
-				Variables:   make(map[string]*api.EnvironmentVariable),
-			}
-			e.environments = append(e.environments, newEnv)
-			_ = e.saveEnvironment(newEnv) // Error intentionally ignored for UI responsiveness
-			e.buildTree()
-			e.refresh()
-		}
+		e.CreateEnvironment(name, desc, project)
 	}
 
 	e.pendingNode = nil
