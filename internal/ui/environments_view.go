@@ -398,6 +398,29 @@ func (e *EnvironmentsView) HasEnvironmentInProject(project string) bool {
 	return false
 }
 
+// IsLastEnvironmentOfActiveProject returns true if the given project has
+// exactly one remaining environment and that environment is the currently
+// active one. Used to guard against silently zeroing out the environments
+// of a project you're actively using - both from the direct EnvNode delete
+// key, and from cascading deletes triggered elsewhere (e.g. deleting the
+// last collection tagged with that project).
+func (e *EnvironmentsView) IsLastEnvironmentOfActiveProject(project string) bool {
+	if project == "" {
+		return false
+	}
+	count := 0
+	for _, env := range e.environments {
+		if env.Project == project {
+			count++
+		}
+	}
+	if count != 1 {
+		return false
+	}
+	active := e.GetActiveEnvironment()
+	return active != nil && active.Project == project
+}
+
 // DeleteEnvironmentsForProject removes every environment file tagged with
 // the given project (accepts either the raw project name or the
 // UngroupedProject sentinel used by the tree UI). Used both by deleting a
@@ -782,20 +805,11 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 					// project with zero environments. Deleting the whole
 					// project (ProjectNode) is the explicit way to do that.
 					project := node.EnvFile.Project
-					if project != "" {
-						count := 0
-						for _, env := range e.environments {
-							if env.Project == project {
-								count++
-							}
-						}
-						active := e.GetActiveEnvironment()
-						if count <= 1 && active != nil && active.Project == project {
-							e.pendingNode = nil
-							return e, func() tea.Msg {
-								return EnvDeleteBlockedMsg{
-									Reason: "Can't delete '" + node.Name + "' - it's the only environment left in the active project '" + project + "'. Delete the project instead.",
-								}
+					if e.IsLastEnvironmentOfActiveProject(project) {
+						e.pendingNode = nil
+						return e, func() tea.Msg {
+							return EnvDeleteBlockedMsg{
+								Reason: "Can't delete '" + node.Name + "' - it's the only environment left in the active project '" + project + "'. Delete the project instead.",
 							}
 						}
 					}
