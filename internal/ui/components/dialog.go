@@ -194,9 +194,11 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 				// Respect Tab-toggled focus between Confirm/Cancel buttons
 				confirmed = d.focusField == 0
 			} else if d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest {
+				confirmed = !d.isOnCancelFocus()
 				method = httpMethods[d.methodIndex]
 				url = d.urlValue
 			} else if d.dialogType == DialogKeyValue {
+				confirmed = !d.isOnCancelFocus()
 				// For key-value dialogs, URL field holds the value
 				url = d.urlValue
 			}
@@ -217,28 +219,20 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 			if d.dialogType == DialogConfirm {
 				// Toggle between Confirm (0) and Cancel (1)
 				d.focusField = (d.focusField + 1) % 2
-			} else if d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest {
-				d.focusField = (d.focusField + 1) % 3
-				// Update cursor position for the new field
-				if d.focusField == 2 {
-					d.cursorPos = len(d.urlValue)
-				} else if d.focusField == 0 {
-					d.cursorPos = len(d.inputValue)
-				}
-			} else if d.dialogType == DialogKeyValue {
-				// Key-value dialog has 2 fields (key=0, value=1)
-				d.focusField = (d.focusField + 1) % 2
-				if d.focusField == 1 {
-					d.cursorPos = len(d.urlValue)
-				} else {
-					d.cursorPos = len(d.inputValue)
-				}
+			} else if fc := d.fieldCount(); fc > 0 {
+				// Fields, then Confirm, then Cancel (fc and fc+1)
+				d.focusField = (d.focusField + 1) % (fc + 2)
+				d.syncCursorForField()
 			}
 
 		case "j":
-			// Toggle Confirm/Cancel on confirm dialogs, otherwise type 'j' in text field
+			// Toggle Confirm/Cancel on confirm dialogs and once past all
+			// fields on button-having dialogs; otherwise type 'j' in field
 			if d.dialogType == DialogConfirm {
 				d.focusField = (d.focusField + 1) % 2
+			} else if d.isOnButtonFocus() {
+				fc := d.fieldCount()
+				d.focusField = fc + (1 - (d.focusField - fc))
 			} else {
 				d.insertChar("j")
 			}
@@ -248,36 +242,32 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 			if d.dialogType == DialogConfirm {
 				// Only 2 options, so toggling either direction lands the same
 				d.focusField = (d.focusField + 1) % 2
-			} else if d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest {
-				d.focusField = (d.focusField + 2) % 3
-				if d.focusField == 2 {
-					d.cursorPos = len(d.urlValue)
-				} else if d.focusField == 0 {
-					d.cursorPos = len(d.inputValue)
-				}
-			} else if d.dialogType == DialogKeyValue {
-				// Key-value dialog has 2 fields
-				d.focusField = (d.focusField + 1) % 2
-				if d.focusField == 1 {
-					d.cursorPos = len(d.urlValue)
-				} else {
-					d.cursorPos = len(d.inputValue)
-				}
+			} else if fc := d.fieldCount(); fc > 0 {
+				d.focusField = (d.focusField + fc + 1) % (fc + 2)
+				d.syncCursorForField()
 			}
 
 		case "k":
-			// Toggle Confirm/Cancel on confirm dialogs, otherwise type 'k' in text field
+			// Toggle Confirm/Cancel on confirm dialogs and once past all
+			// fields on button-having dialogs; otherwise type 'k' in field
 			if d.dialogType == DialogConfirm {
 				d.focusField = (d.focusField + 1) % 2
+			} else if d.isOnButtonFocus() {
+				fc := d.fieldCount()
+				d.focusField = fc + (1 - (d.focusField - fc))
 			} else {
 				d.insertChar("k")
 			}
 
 		case "left":
-			// Arrow left toggles Confirm/Cancel focus on confirm dialogs,
+			// Arrow left toggles Confirm/Cancel focus on confirm dialogs
+			// and once past all fields on button-having dialogs,
 			// otherwise moves cursor in text field
 			if d.dialogType == DialogConfirm {
 				d.focusField = (d.focusField + 1) % 2
+			} else if d.isOnButtonFocus() {
+				fc := d.fieldCount()
+				d.focusField = fc + (1 - (d.focusField - fc))
 			} else if d.cursorPos > 0 {
 				d.cursorPos--
 			}
@@ -285,6 +275,9 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 		case "h":
 			if d.dialogType == DialogConfirm {
 				d.focusField = (d.focusField + 1) % 2
+			} else if d.isOnButtonFocus() {
+				fc := d.fieldCount()
+				d.focusField = fc + (1 - (d.focusField - fc))
 			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 1 {
 				// Change method with h/l on method selector
 				d.methodIndex = (d.methodIndex + len(httpMethods) - 1) % len(httpMethods)
@@ -294,10 +287,14 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 			}
 
 		case "right":
-			// Arrow right toggles Confirm/Cancel focus on confirm dialogs,
+			// Arrow right toggles Confirm/Cancel focus on confirm dialogs
+			// and once past all fields on button-having dialogs,
 			// otherwise moves cursor in text field
 			if d.dialogType == DialogConfirm {
 				d.focusField = (d.focusField + 1) % 2
+			} else if d.isOnButtonFocus() {
+				fc := d.fieldCount()
+				d.focusField = fc + (1 - (d.focusField - fc))
 			} else {
 				currentValue := d.getCurrentValue()
 				if d.cursorPos < len(currentValue) {
@@ -308,6 +305,9 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 		case "l":
 			if d.dialogType == DialogConfirm {
 				d.focusField = (d.focusField + 1) % 2
+			} else if d.isOnButtonFocus() {
+				fc := d.fieldCount()
+				d.focusField = fc + (1 - (d.focusField - fc))
 			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 1 {
 				// Change method with h/l on method selector
 				d.methodIndex = (d.methodIndex + 1) % len(httpMethods)
@@ -388,6 +388,59 @@ func (d *Dialog) getCurrentValue() string {
 	}
 	return d.inputValue
 }
+
+// fieldCount returns the number of real text/selector fields for dialog
+// types that have a tabbable Confirm/Cancel button pair after them
+// (DialogNewRequest/DialogEditRequest: name, method, url = 3;
+// DialogKeyValue: key, value = 2). Returns 0 for dialog types that don't
+// use this button-tabbing scheme (DialogInput, DialogConfirm).
+func (d *Dialog) fieldCount() int {
+	switch d.dialogType {
+	case DialogNewRequest, DialogEditRequest:
+		return 3
+	case DialogKeyValue:
+		return 2
+	default:
+		return 0
+	}
+}
+
+// isOnButtonFocus returns true if focus is currently on the Confirm or
+// Cancel button (i.e. past all the real fields) for dialog types that
+// have them.
+func (d *Dialog) isOnButtonFocus() bool {
+	fc := d.fieldCount()
+	return fc > 0 && d.focusField >= fc
+}
+
+// isOnCancelFocus returns true if focus is specifically on the Cancel
+// button (the last tab stop) for dialog types that have one.
+func (d *Dialog) isOnCancelFocus() bool {
+	fc := d.fieldCount()
+	return fc > 0 && d.focusField == fc+1
+}
+
+// syncCursorForField resets cursorPos appropriately after focus moves onto
+// a real text field (no-op / harmless if focus is on a button).
+func (d *Dialog) syncCursorForField() {
+	switch d.dialogType {
+	case DialogNewRequest, DialogEditRequest:
+		switch d.focusField {
+		case 0:
+			d.cursorPos = len(d.inputValue)
+		case 2:
+			d.cursorPos = len(d.urlValue)
+		}
+	case DialogKeyValue:
+		switch d.focusField {
+		case 0:
+			d.cursorPos = len(d.inputValue)
+		case 1:
+			d.cursorPos = len(d.urlValue)
+		}
+	}
+}
+
 
 // insertChar inserts a character at cursor position in the current field
 func (d *Dialog) insertChar(char string) {
@@ -470,6 +523,15 @@ func (d *Dialog) View(screenWidth, screenHeight int) string {
 			buttons = confirmStyle.Render(confirmLabel) + "  " + cancelStyle.Render(cancelLabel)
 		} else {
 			buttons = cancelStyle.Render(confirmLabel) + "  " + confirmStyle.Render(cancelLabel)
+		}
+	} else if fc := d.fieldCount(); fc > 0 {
+		// New Request / Edit Request / Key-Value dialogs: tabbable
+		// Confirm/Cancel buttons after their fields, highlighted the same way.
+		confirmLabel, cancelLabel := "Confirm", "Cancel"
+		if d.isOnCancelFocus() {
+			buttons = cancelStyle.Render(confirmLabel) + "  " + confirmStyle.Render(cancelLabel)
+		} else {
+			buttons = confirmStyle.Render(confirmLabel) + "  " + cancelStyle.Render(cancelLabel)
 		}
 	} else {
 		buttons = confirmStyle.Render("Enter") + "  " + cancelStyle.Render("Esc")
