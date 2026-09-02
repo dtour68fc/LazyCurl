@@ -76,7 +76,8 @@ type EnvClipboard struct {
 // EnvironmentsView represents the environments panel
 type EnvironmentsView struct {
 	workspacePath    string
-	environmentsPath string
+	environmentsPath string // where NEW environments get saved - global by default
+	legacyLocalPath  string // old per-workspace .lazycurl/environments, still loaded (not saved to) for backward compat
 	environments     []*api.EnvironmentFile
 	tree             []*EnvTreeNode
 	visible          []*EnvTreeNode
@@ -105,13 +106,18 @@ type EnvironmentsView struct {
 // NewEnvironmentsView creates a new environments view
 func NewEnvironmentsView(workspacePath string) *EnvironmentsView {
 	ev := &EnvironmentsView{
-		workspacePath:    workspacePath,
-		environmentsPath: filepath.Join(workspacePath, ".lazycurl", "environments"),
-		cursor:           0,
-		scrollOffset:     0,
-		activeEnvName:    "",
-		activeEnvByProj:  make(map[string]string),
-		search:           components.NewSearchInput(),
+		workspacePath: workspacePath,
+		// New environments save to global scope by default, same reasoning
+		// as CollectionsView - accessible from anywhere, not siloed per-cwd.
+		environmentsPath: config.GetGlobalEnvironmentsPath(),
+		// Existing per-workspace environments (if any) keep loading for
+		// backward compat, they just don't get NEW stuff written there.
+		legacyLocalPath: filepath.Join(workspacePath, ".lazycurl", "environments"),
+		cursor:          0,
+		scrollOffset:    0,
+		activeEnvName:   "",
+		activeEnvByProj: make(map[string]string),
+		search:          components.NewSearchInput(),
 	}
 
 	// Initialize modals
@@ -146,12 +152,12 @@ func NewEnvironmentsView(workspacePath string) *EnvironmentsView {
 
 // loadEnvironments loads environments from the workspace path
 func (e *EnvironmentsView) loadEnvironments() {
-	local, err := api.LoadAllEnvironments(e.environmentsPath)
+	local, err := api.LoadAllEnvironments(e.legacyLocalPath)
 	if err != nil {
 		local = []*api.EnvironmentFile{}
 	}
 
-	global, err := api.LoadAllEnvironments(config.GetGlobalEnvironmentsPath())
+	global, err := api.LoadAllEnvironments(e.environmentsPath)
 	if err != nil {
 		global = []*api.EnvironmentFile{}
 	}
@@ -850,7 +856,7 @@ func (e EnvironmentsView) Update(msg tea.Msg, cfg *config.GlobalConfig) (Environ
 						}
 						newEnv.Name = newName
 						// Generate new file path
-						envDir := filepath.Join(e.workspacePath, ".lazycurl", "environments")
+						envDir := e.environmentsPath
 						newFilePath := filepath.Join(envDir, newName+".json")
 						newEnv.FilePath = newFilePath
 						if err := api.SaveEnvironment(newEnv, newFilePath); err == nil {
@@ -1199,7 +1205,7 @@ func (e EnvironmentsView) View(width, height int, active bool) string {
 		if e.searchQuery != "" {
 			output = append(output, emptyStyle.Render("No matches found"))
 		} else {
-			output = append(output, emptyStyle.Render("No environments found\n\nPress N to create one\n\n.lazycurl/environments/"))
+			output = append(output, emptyStyle.Render("No environments found\n\nPress N to create one\n\n~/.config/lazycurl/environments/"))
 		}
 		return strings.Join(output, "\n")
 	}

@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/kbrdn1/LazyCurl/internal/config"
 	"github.com/kbrdn1/LazyCurl/internal/import/postman"
 )
 
@@ -100,14 +101,15 @@ func ExportEnvironmentToPostman(env *api.EnvironmentFile, outputPath string) tea
 	}
 }
 
-// SaveImportedCollection saves an imported collection to the workspace.
+// SaveImportedCollection saves an imported collection to global scope, so
+// it shows up regardless of which directory lazycurl is launched from.
 func SaveImportedCollection(collection *api.CollectionFile, workspacePath string) error {
 	if collection == nil {
 		return fmt.Errorf("no collection to save")
 	}
 
 	// Create collections directory if needed
-	collectionsDir := filepath.Join(workspacePath, ".lazycurl", "collections")
+	collectionsDir := config.GetGlobalCollectionsPath()
 	if err := os.MkdirAll(collectionsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create collections directory: %w", err)
 	}
@@ -123,14 +125,15 @@ func SaveImportedCollection(collection *api.CollectionFile, workspacePath string
 	return api.SaveCollection(collection, outputPath)
 }
 
-// SaveImportedEnvironment saves an imported environment to the workspace.
+// SaveImportedEnvironment saves an imported environment to global scope, so
+// it shows up regardless of which directory lazycurl is launched from.
 func SaveImportedEnvironment(env *api.EnvironmentFile, workspacePath string) error {
 	if env == nil {
 		return fmt.Errorf("no environment to save")
 	}
 
 	// Create environments directory if needed
-	envsDir := filepath.Join(workspacePath, ".lazycurl", "environments")
+	envsDir := config.GetGlobalEnvironmentsPath()
 	if err := os.MkdirAll(envsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create environments directory: %w", err)
 	}

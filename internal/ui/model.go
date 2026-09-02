@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -285,8 +284,9 @@ func NewModel(globalConfig *config.GlobalConfig, workspaceConfig *config.Workspa
 		statusBar.SetEnvironment(sess.ActiveEnvironment)
 	}
 
-	// Collections directory for OpenAPI import
-	collectionsDir := filepath.Join(workspacePath, ".lazycurl", "collections")
+	// Collections directory for OpenAPI import - same place regular
+	// collections save to (global scope by default).
+	collectionsDir := leftPanel.GetCollections().GetCollectionsPath()
 
 	return Model{
 		globalConfig:       globalConfig,

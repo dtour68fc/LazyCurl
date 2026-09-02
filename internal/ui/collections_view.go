@@ -15,7 +15,8 @@ import (
 // CollectionsView represents the collections panel
 type CollectionsView struct {
 	workspacePath   string
-	collectionsPath string
+	collectionsPath string // where NEW collections get saved - global by default
+	legacyLocalPath string // old per-workspace .lazycurl/collections, still loaded (not saved to) for backward compat
 	tree            *components.Tree
 	collections     []*api.CollectionFile
 	clipboard       *components.TreeNode // For yank/paste
@@ -24,8 +25,17 @@ type CollectionsView struct {
 // NewCollectionsView creates a new collections view
 func NewCollectionsView(workspacePath string) *CollectionsView {
 	cv := &CollectionsView{
-		workspacePath:   workspacePath,
-		collectionsPath: filepath.Join(workspacePath, ".lazycurl", "collections"),
+		workspacePath: workspacePath,
+		// New collections save to global scope by default, so they show up
+		// no matter which directory you launch lazycurl from - previously
+		// this defaulted to a per-workspace `.lazycurl/collections`, which
+		// meant collections were siloed per-cwd unless you deliberately
+		// tagged them into a global-scope one.
+		collectionsPath: config.GetGlobalCollectionsPath(),
+		// Any collections that already exist in the old per-workspace
+		// location keep loading (and can still be edited/deleted in place)
+		// so nothing already saved there silently disappears.
+		legacyLocalPath: filepath.Join(workspacePath, ".lazycurl", "collections"),
 	}
 
 	// Load collections from workspace
@@ -34,16 +44,17 @@ func NewCollectionsView(workspacePath string) *CollectionsView {
 	return cv
 }
 
-// loadCollections loads collections from the workspace path, merged with
-// the global (cross-workspace) collections directory so collections created
-// there show up no matter which project you launch lazycurl from.
+// loadCollections loads collections from the legacy per-workspace path (for
+// backward compat with anything saved there before global-by-default),
+// merged with the global (cross-workspace) collections directory, which is
+// also where new collections get saved.
 func (c *CollectionsView) loadCollections() {
-	local, err := api.LoadAllCollections(c.collectionsPath)
+	local, err := api.LoadAllCollections(c.legacyLocalPath)
 	if err != nil {
 		local = []*api.CollectionFile{}
 	}
 
-	global, err := api.LoadAllCollections(config.GetGlobalCollectionsPath())
+	global, err := api.LoadAllCollections(c.collectionsPath)
 	if err != nil {
 		global = []*api.CollectionFile{}
 	}
