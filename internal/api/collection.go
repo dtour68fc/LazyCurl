@@ -42,11 +42,53 @@ type ScriptConfig struct {
 	PostRequest string `json:"post_request,omitempty"`
 }
 
+// RequestProtocol distinguishes what kind of call a CollectionRequest
+// actually makes - HTTP (the original, and default) or gRPC. Zero value
+// ("") means HTTP, same as if the field were never set at all, so old
+// collection files with no "protocol" key keep working unchanged - every
+// existing HTTP request in every existing collection is implicitly
+// ProtocolHTTP without needing a migration.
+type RequestProtocol string
+
+const (
+	ProtocolHTTP RequestProtocol = "http"
+	ProtocolGRPC RequestProtocol = "grpc"
+)
+
+// IsGRPC reports whether this is a gRPC request - checks for the explicit
+// value rather than "not http", so anything unexpected also falls back
+// to the safe, existing HTTP behavior instead of accidentally being
+// treated as gRPC.
+func (p RequestProtocol) IsGRPC() bool { return p == ProtocolGRPC }
+
+func (p RequestProtocol) String() string {
+	if p.IsGRPC() {
+		return "gRPC"
+	}
+	return "HTTP"
+}
+
+// GRPCConfig holds gRPC-specific request configuration - the gRPC
+// counterpart to BodyConfig/AuthConfig above. Server reflection (or a
+// supplied ProtoFile, for servers without reflection enabled) does the
+// actual service/method schema discovery at call time - this struct just
+// holds what the user picked/typed.
+type GRPCConfig struct {
+	Server    string          `json:"server,omitempty"`     // host:port
+	Service   string          `json:"service,omitempty"`    // fully-qualified service name, e.g. "myapp.UserService"
+	Method    string          `json:"method,omitempty"`     // method name within Service
+	Message   string          `json:"message,omitempty"`    // request message as JSON, matching the method's input type
+	Metadata  []KeyValueEntry `json:"metadata,omitempty"`   // gRPC metadata - same shape as HTTP headers
+	UseTLS    bool            `json:"use_tls,omitempty"`
+	ProtoFile string          `json:"proto_file,omitempty"` // optional - only needed if Server doesn't support reflection
+}
+
 // CollectionRequest represents a saved request in a collection
 type CollectionRequest struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
 	Description string            `json:"description,omitempty"`
+	Protocol    RequestProtocol   `json:"protocol,omitempty"`    // "" (== ProtocolHTTP) or "grpc"
 	Method      HTTPMethod        `json:"method"`
 	URL         string            `json:"url"`
 	Params      []KeyValueEntry   `json:"params,omitempty"`      // Query parameters
@@ -56,6 +98,7 @@ type CollectionRequest struct {
 	Body        *BodyConfig       `json:"body,omitempty"`        // Request body config
 	Scripts     *ScriptConfig     `json:"scripts,omitempty"`     // Pre/post scripts
 	Tests       []Test            `json:"tests,omitempty"`
+	GRPC        *GRPCConfig       `json:"grpc,omitempty"`        // Only set when Protocol == ProtocolGRPC
 }
 
 // Folder represents a folder in a collection
@@ -518,11 +561,12 @@ func (c *CollectionFile) RenameRequest(id, newName string) bool {
 	return false
 }
 
-// UpdateRequest updates a request's name, method, and URL by ID
-func (c *CollectionFile) UpdateRequest(id, newName string, method HTTPMethod, url string) bool {
+// UpdateRequest updates a request's name, protocol, method, and URL by ID
+func (c *CollectionFile) UpdateRequest(id, newName string, protocol RequestProtocol, method HTTPMethod, url string) bool {
 	req := c.FindRequest(id)
 	if req != nil {
 		req.Name = newName
+		req.Protocol = protocol
 		req.Method = method
 		req.URL = url
 		return true
@@ -561,6 +605,22 @@ func (c *CollectionFile) UpdateRequestBody(id, bodyType, content string) bool {
 		return true
 	}
 	return false
+}
+
+// UpdateRequestGRPCMessage updates the gRPC message content of a request by
+// ID - the gRPC counterpart to UpdateRequestBody. Leaves Server/Service/
+// Method/Metadata/TLS untouched (or creates a bare GRPCConfig with just the
+// message if one didn't exist yet).
+func (c *CollectionFile) UpdateRequestGRPCMessage(id, message string) bool {
+	req := c.FindRequest(id)
+	if req == nil {
+		return false
+	}
+	if req.GRPC == nil {
+		req.GRPC = &GRPCConfig{}
+	}
+	req.GRPC.Message = message
+	return true
 }
 
 // UpdateRequestScripts updates the scripts of a request by ID
@@ -633,6 +693,7 @@ func (c *CollectionFile) DuplicateRequest(id string) *CollectionRequest {
 		ID:          GenerateID(),
 		Name:        original.Name + " (copy)",
 		Description: original.Description,
+		Protocol:    original.Protocol,
 		Method:      original.Method,
 		URL:         original.URL,
 		Params:      copyParams(original.Params),
@@ -640,6 +701,7 @@ func (c *CollectionFile) DuplicateRequest(id string) *CollectionRequest {
 		Auth:        copyAuthConfig(original.Auth),
 		Body:        copyBodyConfig(original.Body),
 		Scripts:     copyScriptConfig(original.Scripts),
+		GRPC:        copyGRPCConfig(original.GRPC),
 	}
 
 	// Add duplicate next to original - find where and add
@@ -703,6 +765,22 @@ func copyScriptConfig(s *ScriptConfig) *ScriptConfig {
 	return &ScriptConfig{
 		PreRequest:  s.PreRequest,
 		PostRequest: s.PostRequest,
+	}
+}
+
+// copyGRPCConfig creates a copy of gRPC config
+func copyGRPCConfig(g *GRPCConfig) *GRPCConfig {
+	if g == nil {
+		return nil
+	}
+	return &GRPCConfig{
+		Server:    g.Server,
+		Service:   g.Service,
+		Method:    g.Method,
+		Message:   g.Message,
+		Metadata:  copyHeaders(g.Metadata),
+		UseTLS:    g.UseTLS,
+		ProtoFile: g.ProtoFile,
 	}
 }
 
@@ -792,6 +870,7 @@ func copyFolder(f *Folder) *Folder {
 			ID:          GenerateID(),
 			Name:        req.Name,
 			Description: req.Description,
+			Protocol:    req.Protocol,
 			Method:      req.Method,
 			URL:         req.URL,
 			Params:      copyParams(req.Params),
@@ -799,6 +878,7 @@ func copyFolder(f *Folder) *Folder {
 			Auth:        copyAuthConfig(req.Auth),
 			Body:        copyBodyConfig(req.Body),
 			Scripts:     copyScriptConfig(req.Scripts),
+			GRPC:        copyGRPCConfig(req.GRPC),
 		}
 	}
 
@@ -846,6 +926,7 @@ func (c *CollectionFile) CopyRequestToFolder(requestID string, targetFolderPath 
 		ID:          GenerateID(),
 		Name:        original.Name + " (copy)",
 		Description: original.Description,
+		Protocol:    original.Protocol,
 		Method:      original.Method,
 		URL:         original.URL,
 		Params:      copyParams(original.Params),
@@ -853,6 +934,7 @@ func (c *CollectionFile) CopyRequestToFolder(requestID string, targetFolderPath 
 		Auth:        copyAuthConfig(original.Auth),
 		Body:        copyBodyConfig(original.Body),
 		Scripts:     copyScriptConfig(original.Scripts),
+		GRPC:        copyGRPCConfig(original.GRPC),
 	}
 
 	// Add to target folder

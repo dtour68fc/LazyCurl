@@ -222,25 +222,26 @@ func (c *CollectionsView) GetFolderPath(node *components.TreeNode) []string {
 	return path
 }
 
+// protocolFromDialogLabel converts the dialog's display label ("HTTP" /
+// "gRPC") into the stored api.RequestProtocol value. Anything other than
+// an exact "gRPC" match is treated as HTTP - matches
+// api.RequestProtocol.IsGRPC()'s own "safe default" philosophy.
+func protocolFromDialogLabel(label string) api.RequestProtocol {
+	if label == "gRPC" {
+		return api.ProtocolGRPC
+	}
+	return api.ProtocolHTTP
+}
+
 // AddRequestToCollection adds a new request to the appropriate collection
-func (c *CollectionsView) AddRequestToCollection(name, method, url string, parentNode *components.TreeNode) error {
+func (c *CollectionsView) AddRequestToCollection(name, method, protocol, url string, parentNode *components.TreeNode) error {
 	col := c.FindCollectionByNode(parentNode)
 	if col == nil {
 		// No collection exists, create one
-		return c.createDefaultCollectionWithRequest(name, method, url)
+		return c.createDefaultCollectionWithRequest(name, method, protocol, url)
 	}
 
-	req := &api.CollectionRequest{
-		ID:     api.GenerateID(),
-		Name:   name,
-		Method: api.HTTPMethod(method),
-		URL:    url,
-		Headers: []api.KeyValueEntry{
-			{Key: "Content-Type", Value: "application/json", Enabled: true},
-			{Key: "Accept", Value: "*/*", Enabled: true},
-			{Key: "User-Agent", Value: "LazyCurl/1.0", Enabled: true},
-		},
-	}
+	req := newRequestForProtocol(name, method, protocol, url)
 
 	// Get folder path
 	folderPath := c.GetFolderPath(parentNode)
@@ -257,8 +258,34 @@ func (c *CollectionsView) AddRequestToCollection(name, method, url string, paren
 	return col.Save()
 }
 
+// newRequestForProtocol builds a fresh CollectionRequest for either HTTP
+// (with the usual default headers) or gRPC (with a seeded GRPCConfig using
+// the dialog's URL field as the server address - default HTTP headers
+// don't apply to gRPC calls, which use metadata instead).
+func newRequestForProtocol(name, method, protocol, url string) *api.CollectionRequest {
+	req := &api.CollectionRequest{
+		ID:       api.GenerateID(),
+		Name:     name,
+		Protocol: protocolFromDialogLabel(protocol),
+		Method:   api.HTTPMethod(method),
+		URL:      url,
+	}
+
+	if req.Protocol.IsGRPC() {
+		req.GRPC = &api.GRPCConfig{Server: url}
+	} else {
+		req.Headers = []api.KeyValueEntry{
+			{Key: "Content-Type", Value: "application/json", Enabled: true},
+			{Key: "Accept", Value: "*/*", Enabled: true},
+			{Key: "User-Agent", Value: "LazyCurl/1.0", Enabled: true},
+		}
+	}
+
+	return req
+}
+
 // createDefaultCollectionWithRequest creates a new collection with a request
-func (c *CollectionsView) createDefaultCollectionWithRequest(name, method, url string) error {
+func (c *CollectionsView) createDefaultCollectionWithRequest(name, method, protocol, url string) error {
 	col := &api.CollectionFile{
 		Name:     "New Collection",
 		Requests: []api.CollectionRequest{},
@@ -266,17 +293,7 @@ func (c *CollectionsView) createDefaultCollectionWithRequest(name, method, url s
 		FilePath: filepath.Join(c.collectionsPath, "collection.json"),
 	}
 
-	req := &api.CollectionRequest{
-		ID:     api.GenerateID(),
-		Name:   name,
-		Method: api.HTTPMethod(method),
-		URL:    url,
-		Headers: []api.KeyValueEntry{
-			{Key: "Content-Type", Value: "application/json", Enabled: true},
-			{Key: "Accept", Value: "*/*", Enabled: true},
-			{Key: "User-Agent", Value: "LazyCurl/1.0", Enabled: true},
-		},
-	}
+	req := newRequestForProtocol(name, method, protocol, url)
 
 	col.AddRequest(req)
 	return col.Save()
@@ -366,7 +383,7 @@ func (c *CollectionsView) RenameNode(node *components.TreeNode, newName string) 
 }
 
 // UpdateRequest updates a request node's name, method, and URL
-func (c *CollectionsView) UpdateRequest(node *components.TreeNode, name, method, url string) error {
+func (c *CollectionsView) UpdateRequest(node *components.TreeNode, name, method, protocol, url string) error {
 	if node == nil || node.Type != components.RequestNode {
 		return nil
 	}
@@ -376,7 +393,7 @@ func (c *CollectionsView) UpdateRequest(node *components.TreeNode, name, method,
 		return nil
 	}
 
-	col.UpdateRequest(node.ID, name, api.HTTPMethod(method), url)
+	col.UpdateRequest(node.ID, name, protocolFromDialogLabel(protocol), api.HTTPMethod(method), url)
 	return col.Save()
 }
 
@@ -405,6 +422,21 @@ func (c *CollectionsView) UpdateRequestBodyByID(requestID, bodyType, content str
 	// Search through all collections
 	for _, col := range c.collections {
 		if col.UpdateRequestBody(requestID, bodyType, content) {
+			return col.Save()
+		}
+	}
+
+	return nil
+}
+
+// UpdateRequestGRPCMessageByID finds a request by ID across all collections and updates its gRPC message content
+func (c *CollectionsView) UpdateRequestGRPCMessageByID(requestID, message string) error {
+	if requestID == "" {
+		return nil
+	}
+
+	for _, col := range c.collections {
+		if col.UpdateRequestGRPCMessage(requestID, message) {
 			return col.Save()
 		}
 	}

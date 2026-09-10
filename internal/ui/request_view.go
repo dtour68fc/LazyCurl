@@ -187,12 +187,17 @@ const (
 type RequestView struct {
 	method       api.HTTPMethod
 	url          string
+	protocol     api.RequestProtocol // "" (== HTTP) or "grpc" - drives which tabs are shown
 	tabs         *components.Tabs
 	paramsTable  *components.Table // Query params
 	pathParams   *components.Table // Path params (:id, :slug, etc.)
 	headersTable *components.Table
 	bodyEditor   *components.Editor
 	bodyType     BodyType
+
+	// gRPC tabs (only shown/used when protocol == grpc)
+	grpcServerTable   *components.Table // fixed rows: Server, Service, Method, TLS
+	grpcMetadataTable *components.Table // free-form key/value, same shape as headersTable
 
 	// Authorization tab
 	authType           AuthType
@@ -229,6 +234,14 @@ type RequestView struct {
 	lastEnvVars map[string]string
 }
 
+// httpTabNames and grpcTabNames are the two tab sets the request editor
+// switches between depending on the loaded request's protocol. Scripts is
+// shared - pre/post-request scripts make sense for both.
+var (
+	httpTabNames = []string{"Params", "Authorization", "Headers", "Body", "Scripts"}
+	grpcTabNames = []string{"Server", "Metadata", "Message", "Scripts"}
+)
+
 // KeyValueClipboard holds copied key-value data
 type KeyValueClipboard struct {
 	Key   string
@@ -237,18 +250,27 @@ type KeyValueClipboard struct {
 
 // NewRequestView creates a new request view
 func NewRequestView() *RequestView {
-	// Create tabs (shortcuts not displayed)
-	tabs := components.NewTabs([]string{
-		"Params",
-		"Authorization",
-		"Headers",
-		"Body",
-		"Scripts",
-	})
+	// Create tabs (shortcuts not displayed) - starts in the HTTP set;
+	// LoadCollectionRequest swaps to the gRPC set for gRPC requests.
+	tabs := components.NewTabs(append([]string(nil), httpTabNames...))
 
 	paramsTable := components.NewTable([]string{"", "Key", "Value"})
 	pathParams := components.NewTable([]string{"", "Key", "Value"})
 	headersTable := components.NewTable([]string{"", "Key", "Value"})
+
+	// gRPC Server tab - fixed rows for the pieces grpcdynamic reflection
+	// needs (host:port, service, method, TLS on/off). Reuses the same
+	// Table component as Headers/Params, so add/edit/delete/rename all
+	// work for free, though in practice only the Value column of these
+	// four rows should really be touched.
+	grpcServerTable := components.NewTable([]string{"", "Field", "Value"})
+	grpcServerTable.AddRow("Server", "")
+	grpcServerTable.AddRow("Service", "")
+	grpcServerTable.AddRow("Method", "")
+	grpcServerTable.AddRow("TLS", "false")
+
+	// gRPC Metadata tab - free-form key/value, same shape as HTTP headers
+	grpcMetadataTable := components.NewTable([]string{"", "Key", "Value"})
 
 	// Initialize body editor with sample JSON
 	bodyEditor := components.NewEditor(`{
@@ -286,6 +308,8 @@ const response = pm.response.json();`, "javascript")
 		headersTable:       headersTable,
 		bodyEditor:         bodyEditor,
 		bodyType:           JSONBody,
+		grpcServerTable:    grpcServerTable,
+		grpcMetadataTable:  grpcMetadataTable,
 		authType:           AuthNone,
 		authToken:          "",
 		authPrefix:         "Bearer",
@@ -326,9 +350,44 @@ func (r *RequestView) getCurrentTable() *components.Table {
 		return r.paramsTable
 	case "Headers":
 		return r.headersTable
+	case "Server":
+		return r.grpcServerTable
+	case "Metadata":
+		return r.grpcMetadataTable
 	default:
 		return nil
 	}
+}
+
+// isBodyLikeTab returns true for whichever tab holds the editable,
+// editor-backed request payload - "Body" for HTTP requests, "Message" for
+// gRPC ones (they're mutually exclusive per protocol and both back onto
+// bodyEditor, so everywhere "Body" used to be checked for editor-forwarding
+// purposes, "Message" needs to work identically).
+func (r *RequestView) isBodyLikeTab() bool {
+	active := r.tabs.GetActive()
+	return active == "Body" || active == "Message"
+}
+
+// rebuildTabsForProtocol swaps the visible tab set to match the given
+// protocol (HTTP's Params/Authorization/Headers/Body/Scripts vs gRPC's
+// Server/Metadata/Message/Scripts) and resets to the first tab. gRPC's
+// Message tab always reuses bodyEditor, so bodyType is forced to JSONBody
+// to match (the message is always a JSON representation of the protobuf
+// request, never form-data/raw/binary/none).
+func (r *RequestView) rebuildTabsForProtocol(protocol api.RequestProtocol) {
+	r.protocol = protocol
+	if protocol.IsGRPC() {
+		r.tabs.SetItems(append([]string(nil), grpcTabNames...))
+		r.bodyType = JSONBody
+	} else {
+		r.tabs.SetItems(append([]string(nil), httpTabNames...))
+	}
+}
+
+// GetProtocol returns the request's protocol
+func (r *RequestView) GetProtocol() api.RequestProtocol {
+	return r.protocol
 }
 
 // getTabName returns the tab name including section for Params tab
@@ -403,7 +462,7 @@ func (r *RequestView) DuplicateRow(index int) {
 // IsEditorActive returns true if an editor tab (Body or Scripts) is active
 func (r *RequestView) IsEditorActive() bool {
 	tab := r.tabs.GetActive()
-	return tab == "Body" || tab == "Scripts"
+	return tab == "Body" || tab == "Message" || tab == "Scripts"
 }
 
 // IsEditorInInsertMode returns true if the body editor is in INSERT mode
@@ -519,7 +578,7 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 
 	case components.SearchUpdateMsg, components.SearchCloseMsg:
 		// Forward search messages to the active editor
-		if r.tabs.GetActive() == "Body" && r.bodyType == JSONBody {
+		if r.isBodyLikeTab() && r.bodyType == JSONBody {
 			editor, cmd := r.bodyEditor.Update(msg, true)
 			r.bodyEditor = editor
 			return r, cmd
@@ -538,7 +597,7 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 
 	case components.EditorFormatMsg:
 		// Handle format result from editor - also emit body changed
-		if msg.Success && r.tabs.GetActive() == "Body" {
+		if msg.Success && r.isBodyLikeTab() {
 			bodyType := r.bodyType.String()
 			content := r.bodyEditor.GetContent()
 			return r, func() tea.Msg {
@@ -549,7 +608,7 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 
 	case components.EditorContentChangedMsg:
 		// Handle content changes from body editor
-		if r.tabs.GetActive() == "Body" && r.bodyType == JSONBody {
+		if r.isBodyLikeTab() && r.bodyType == JSONBody {
 			bodyType := r.bodyType.String()
 			return r, func() tea.Msg {
 				return RequestBodyChangedMsg{BodyType: bodyType, Content: msg.Content}
@@ -573,7 +632,7 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 		}
 
 		// If in Body tab with JSON body type, forward to editor
-		if r.tabs.GetActive() == "Body" && r.bodyType == JSONBody {
+		if r.isBodyLikeTab() && r.bodyType == JSONBody {
 			// Only intercept tab switching and send request when in NORMAL mode and not searching
 			if r.bodyEditor.GetMode() == components.EditorInsertMode || r.bodyEditor.IsSearching() {
 				// In INSERT mode or searching, forward everything to editor
@@ -1592,6 +1651,12 @@ func (r RequestView) View(width, height int, active bool) string {
 		tabContent = r.renderHeadersTab(width, contentHeight, active)
 	case "Body":
 		tabContent = r.renderBodyTab(width, contentHeight)
+	case "Server":
+		tabContent = r.renderTableEnvStyle(r.grpcServerTable, width, contentHeight, active)
+	case "Metadata":
+		tabContent = r.renderMetadataTab(width, contentHeight, active)
+	case "Message":
+		tabContent = r.renderBodyTab(width, contentHeight)
 	case "Scripts":
 		tabContent = r.renderScriptsTab(width, contentHeight)
 	default:
@@ -1853,6 +1918,22 @@ func (r *RequestView) renderHeadersTab(width, height int, active bool) string {
 	}
 
 	return r.renderTableEnvStyle(r.headersTable, width, height, active)
+}
+
+// renderMetadataTab renders the gRPC Metadata tab (same shape as Headers,
+// just backed by grpcMetadataTable instead)
+func (r *RequestView) renderMetadataTab(width, height int, active bool) string {
+	if r.grpcMetadataTable.RowCount() == 0 {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(styles.Subtext0).
+			Width(width).
+			Align(lipgloss.Center).
+			Padding(2, 0)
+
+		return emptyStyle.Render("No metadata\n\nPress n to add a metadata entry")
+	}
+
+	return r.renderTableEnvStyle(r.grpcMetadataTable, width, height, active)
 }
 
 // renderBodyTab renders the Request Body tab
@@ -2171,11 +2252,38 @@ func (r *RequestView) LoadCollectionRequest(req *api.CollectionRequest) {
 	r.currentRequestID = req.ID
 	r.currentRequestName = req.Name
 
+	// Switch to the right tab set for this request's protocol before
+	// anything else - HTTP vs gRPC affects how Body/bodyType get treated
+	// below (forced to JSONBody for gRPC's Message tab).
+	r.rebuildTabsForProtocol(req.Protocol)
+
 	// Set HTTP method
 	r.method = req.Method
 
 	// Set URL
 	r.url = req.URL
+
+	// Load gRPC-specific fields (server/service/method/TLS + metadata).
+	// Table rows are always reset to the fixed 4-row shape even if the
+	// stored GRPCConfig is nil (brand new gRPC request), so the tab isn't
+	// just blank.
+	r.grpcServerTable.Rows = nil
+	r.grpcServerTable.AddRow("Server", "")
+	r.grpcServerTable.AddRow("Service", "")
+	r.grpcServerTable.AddRow("Method", "")
+	r.grpcServerTable.AddRow("TLS", "false")
+	r.grpcMetadataTable.Rows = nil
+	if req.GRPC != nil {
+		r.grpcServerTable.Rows[0].Value = req.GRPC.Server
+		r.grpcServerTable.Rows[1].Value = req.GRPC.Service
+		r.grpcServerTable.Rows[2].Value = req.GRPC.Method
+		if req.GRPC.UseTLS {
+			r.grpcServerTable.Rows[3].Value = "true"
+		}
+		for _, md := range req.GRPC.Metadata {
+			r.grpcMetadataTable.AddRowWithState(md.Key, md.Value, md.Enabled)
+		}
+	}
 
 	// Clear and load params
 	r.paramsTable.Rows = nil
@@ -2246,6 +2354,13 @@ func (r *RequestView) LoadCollectionRequest(req *api.CollectionRequest) {
 		r.bodyEditor = components.NewEditor(`{
 
 }`, "json")
+	}
+
+	// gRPC requests never have req.Body set (that field is HTTP-only) -
+	// their message content lives in req.GRPC.Message instead, loaded into
+	// the same bodyEditor the Message tab shares with Body.
+	if req.Protocol.IsGRPC() && req.GRPC != nil && req.GRPC.Message != "" {
+		r.bodyEditor = components.NewEditor(req.GRPC.Message, "json")
 	}
 
 	// Load scripts content

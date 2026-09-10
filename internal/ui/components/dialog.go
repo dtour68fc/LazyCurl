@@ -23,6 +23,10 @@ const (
 // HTTP methods for request creation
 var httpMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 
+// Request protocols for request creation - index 0 is always the default
+// (HTTP), matching api.RequestProtocol's zero value semantics.
+var requestProtocols = []string{"HTTP", "gRPC"}
+
 // Dialog represents a modal dialog component
 type Dialog struct {
 	visible     bool
@@ -38,9 +42,10 @@ type Dialog struct {
 	context     interface{} // Generic context for callbacks
 
 	// For new request dialog
-	methodIndex int    // Selected HTTP method index
-	urlValue    string // URL endpoint (also used as "value" for key-value dialogs)
-	focusField  int    // 0=name/key, 1=method, 2=url/value
+	methodIndex   int    // Selected HTTP method index
+	protocolIndex int    // Selected protocol index (0=HTTP, 1=gRPC)
+	urlValue      string // URL endpoint (also used as "value" for key-value dialogs)
+	focusField    int    // 0=name/key, 1=protocol, 2=method, 3=url/value
 }
 
 // DialogResultMsg is sent when a dialog is completed
@@ -49,6 +54,7 @@ type DialogResultMsg struct {
 	Confirmed bool
 	Value     string
 	Method    string // HTTP method for new request
+	Protocol  string // "HTTP" or "gRPC" for new/edit request
 	URL       string // URL endpoint for new request / Value for key-value dialogs
 	Node      *TreeNode
 	Context   interface{} // Generic context for callbacks
@@ -105,7 +111,8 @@ func (d *Dialog) ShowNewRequest(action string, node *TreeNode) {
 	d.message = ""
 	d.inputValue = "New Request"
 	d.cursorPos = len(d.inputValue)
-	d.methodIndex = 0 // GET by default
+	d.methodIndex = 0   // GET by default
+	d.protocolIndex = 0 // HTTP by default
 	d.urlValue = "{{base_url}}/endpoint"
 	d.action = action
 	d.targetNode = node
@@ -143,6 +150,14 @@ func (d *Dialog) ShowEditRequest(node *TreeNode) {
 	for i, m := range httpMethods {
 		if m == node.HTTPMethod {
 			d.methodIndex = i
+			break
+		}
+	}
+	// Find protocol index
+	d.protocolIndex = 0
+	for i, p := range requestProtocols {
+		if strings.EqualFold(p, node.Protocol) {
+			d.protocolIndex = i
 			break
 		}
 	}
@@ -188,6 +203,7 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 			// Confirm dialog
 			d.Hide()
 			method := ""
+			protocol := ""
 			url := ""
 			confirmed := true
 			if d.dialogType == DialogConfirm {
@@ -196,6 +212,7 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 			} else if d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest {
 				confirmed = !d.isOnCancelFocus()
 				method = httpMethods[d.methodIndex]
+				protocol = requestProtocols[d.protocolIndex]
 				url = d.urlValue
 			} else if d.dialogType == DialogKeyValue {
 				confirmed = !d.isOnCancelFocus()
@@ -208,6 +225,7 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 					Confirmed: confirmed,
 					Value:     d.inputValue,
 					Method:    method,
+					Protocol:  protocol,
 					URL:       url,
 					Node:      d.targetNode,
 					Context:   d.context,
@@ -279,6 +297,9 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 				fc := d.fieldCount()
 				d.focusField = fc + (1 - (d.focusField - fc))
 			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 1 {
+				// Change protocol with h/l on protocol selector
+				d.protocolIndex = (d.protocolIndex + len(requestProtocols) - 1) % len(requestProtocols)
+			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 2 {
 				// Change method with h/l on method selector
 				d.methodIndex = (d.methodIndex + len(httpMethods) - 1) % len(httpMethods)
 			} else {
@@ -309,6 +330,9 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 				fc := d.fieldCount()
 				d.focusField = fc + (1 - (d.focusField - fc))
 			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 1 {
+				// Change protocol with h/l on protocol selector
+				d.protocolIndex = (d.protocolIndex + 1) % len(requestProtocols)
+			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 2 {
 				// Change method with h/l on method selector
 				d.methodIndex = (d.methodIndex + 1) % len(httpMethods)
 			} else {
@@ -321,7 +345,7 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 				if d.focusField == 0 && len(d.inputValue) > 0 && d.cursorPos > 0 {
 					d.inputValue = d.inputValue[:d.cursorPos-1] + d.inputValue[d.cursorPos:]
 					d.cursorPos--
-				} else if d.focusField == 2 && len(d.urlValue) > 0 && d.cursorPos > 0 {
+				} else if d.focusField == 3 && len(d.urlValue) > 0 && d.cursorPos > 0 {
 					d.urlValue = d.urlValue[:d.cursorPos-1] + d.urlValue[d.cursorPos:]
 					d.cursorPos--
 				}
@@ -352,7 +376,7 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 					if d.focusField == 0 {
 						d.inputValue = d.inputValue[:d.cursorPos] + char + d.inputValue[d.cursorPos:]
 						d.cursorPos++
-					} else if d.focusField == 2 {
+					} else if d.focusField == 3 {
 						d.urlValue = d.urlValue[:d.cursorPos] + char + d.urlValue[d.cursorPos:]
 						d.cursorPos++
 					}
@@ -378,7 +402,7 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 // getCurrentValue returns the current field value based on focus
 func (d *Dialog) getCurrentValue() string {
 	if d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest {
-		if d.focusField == 2 {
+		if d.focusField == 3 {
 			return d.urlValue
 		}
 	} else if d.dialogType == DialogKeyValue {
@@ -391,13 +415,13 @@ func (d *Dialog) getCurrentValue() string {
 
 // fieldCount returns the number of real text/selector fields for dialog
 // types that have a tabbable Confirm/Cancel button pair after them
-// (DialogNewRequest/DialogEditRequest: name, method, url = 3;
+// (DialogNewRequest/DialogEditRequest: name, protocol, method, url = 4;
 // DialogKeyValue: key, value = 2). Returns 0 for dialog types that don't
 // use this button-tabbing scheme (DialogInput, DialogConfirm).
 func (d *Dialog) fieldCount() int {
 	switch d.dialogType {
 	case DialogNewRequest, DialogEditRequest:
-		return 3
+		return 4
 	case DialogKeyValue:
 		return 2
 	default:
@@ -428,7 +452,7 @@ func (d *Dialog) syncCursorForField() {
 		switch d.focusField {
 		case 0:
 			d.cursorPos = len(d.inputValue)
-		case 2:
+		case 3:
 			d.cursorPos = len(d.urlValue)
 		}
 	case DialogKeyValue:
@@ -448,11 +472,12 @@ func (d *Dialog) insertChar(char string) {
 		if d.focusField == 0 {
 			d.inputValue = d.inputValue[:d.cursorPos] + char + d.inputValue[d.cursorPos:]
 			d.cursorPos++
-		} else if d.focusField == 2 {
+		} else if d.focusField == 3 {
 			d.urlValue = d.urlValue[:d.cursorPos] + char + d.urlValue[d.cursorPos:]
 			d.cursorPos++
 		}
-		// focusField == 1 is method selector, no text input
+		// focusField == 1 is protocol selector, focusField == 2 is method
+		// selector - neither takes text input
 	} else if d.dialogType == DialogKeyValue {
 		if d.focusField == 0 {
 			d.inputValue = d.inputValue[:d.cursorPos] + char + d.inputValue[d.cursorPos:]
@@ -589,17 +614,29 @@ func (d *Dialog) renderNewRequestForm(width int) string {
 		content.WriteString(inputStyle.Render(nameInput))
 	}
 
+	// Protocol field
+	content.WriteString("\n")
+	content.WriteString(labelStyle.Render("Protocol: "))
+	protocolDisplay := d.renderProtocolSelector(d.focusField == 1)
+	content.WriteString(protocolDisplay)
+
 	// Method field
 	content.WriteString("\n")
 	content.WriteString(labelStyle.Render("Method: "))
-	methodDisplay := d.renderMethodSelector(width, d.focusField == 1)
+	methodDisplay := d.renderMethodSelector(width, d.focusField == 2)
 	content.WriteString(methodDisplay)
 
-	// URL field
+	// URL field (relabeled "Server" for gRPC requests, since that's what
+	// this value actually means once the request is gRPC - a host:port,
+	// not an HTTP URL)
 	content.WriteString("\n")
-	content.WriteString(labelStyle.Render("URL: "))
+	if requestProtocols[d.protocolIndex] == "gRPC" {
+		content.WriteString(labelStyle.Render("Server: "))
+	} else {
+		content.WriteString(labelStyle.Render("URL: "))
+	}
 	urlInput := d.urlValue
-	if d.focusField == 2 {
+	if d.focusField == 3 {
 		urlInput = d.renderWithCursor(d.urlValue, d.cursorPos)
 		content.WriteString(activeInputStyle.Render(urlInput))
 	} else {
@@ -614,9 +651,36 @@ func (d *Dialog) renderNewRequestForm(width int) string {
 		Italic(true).
 		Width(width).
 		Align(lipgloss.Center)
-	content.WriteString(helpStyle.Render("Tab: next • h/l: method"))
+	content.WriteString(helpStyle.Render("Tab: next • h/l: protocol/method"))
 
 	return content.String()
+}
+
+// renderProtocolSelector renders the HTTP/gRPC protocol toggle, same visual
+// pattern as the method selector (arrows either side of the current value).
+func (d *Dialog) renderProtocolSelector(active bool) string {
+	protocol := requestProtocols[d.protocolIndex]
+
+	var bg, fg lipgloss.Color
+	if protocol == "gRPC" {
+		bg, fg = styles.Mauve, styles.Crust
+	} else {
+		bg, fg = styles.Blue, styles.Crust
+	}
+
+	protocolStyle := lipgloss.NewStyle().
+		Background(bg).
+		Foreground(fg).
+		Bold(true).
+		Padding(0, 1)
+
+	arrowStyle := lipgloss.NewStyle().
+		Foreground(styles.Subtext0)
+	if active {
+		arrowStyle = arrowStyle.Foreground(styles.Lavender)
+	}
+
+	return arrowStyle.Render("◀ ") + protocolStyle.Render(protocol) + arrowStyle.Render(" ▶")
 }
 
 // getTreePath returns the path in the tree where the request will be created

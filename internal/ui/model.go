@@ -1164,10 +1164,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case RequestBodyChangedMsg:
-		// Handle body content change - save to collection
+		// Handle body/message content change - save to collection. gRPC
+		// requests store their content in GRPC.Message rather than Body,
+		// since it's a protobuf message, not an HTTP body.
 		requestID := m.requestPanel.GetCurrentRequestID()
 		if requestID != "" {
-			if err := m.leftPanel.GetCollections().UpdateRequestBodyByID(requestID, msg.BodyType, msg.Content); err != nil {
+			var err error
+			if m.requestPanel.GetProtocol().IsGRPC() {
+				err = m.leftPanel.GetCollections().UpdateRequestGRPCMessageByID(requestID, msg.Content)
+			} else {
+				err = m.leftPanel.GetCollections().UpdateRequestBodyByID(requestID, msg.BodyType, msg.Content)
+			}
+			if err != nil {
 				m.statusBar.Error(err)
 			}
 		}
@@ -2297,7 +2305,7 @@ func (m Model) handleDialogResult(msg components.DialogResultMsg) (tea.Model, te
 		}
 	case "new_request":
 		if msg.Value != "" {
-			m.performNewRequest(msg.Value, msg.Method, msg.URL, msg.Node)
+			m.performNewRequest(msg.Value, msg.Method, msg.Protocol, msg.URL, msg.Node)
 		}
 	case "new_folder":
 		if msg.Value != "" {
@@ -2305,7 +2313,7 @@ func (m Model) handleDialogResult(msg components.DialogResultMsg) (tea.Model, te
 		}
 	case "edit_request":
 		if msg.Node != nil && msg.Value != "" {
-			m.performEditRequest(msg.Node, msg.Value, msg.Method, msg.URL)
+			m.performEditRequest(msg.Node, msg.Value, msg.Method, msg.Protocol, msg.URL)
 		}
 
 	// === REQUEST PANEL ACTIONS ===
@@ -2440,13 +2448,17 @@ func (m *Model) performDelete(node *components.TreeNode) {
 }
 
 // performNewRequest creates a new request
-func (m *Model) performNewRequest(name, method, url string, parent *components.TreeNode) {
-	if err := m.leftPanel.GetCollections().AddRequestToCollection(name, method, url, parent); err != nil {
+func (m *Model) performNewRequest(name, method, protocol, url string, parent *components.TreeNode) {
+	if err := m.leftPanel.GetCollections().AddRequestToCollection(name, method, protocol, url, parent); err != nil {
 		m.statusBar.Error(err)
 		return
 	}
 
-	m.statusBar.Success("Created", method+" "+name)
+	label := method
+	if protocol == "gRPC" {
+		label = "gRPC"
+	}
+	m.statusBar.Success("Created", label+" "+name)
 	m.leftPanel.GetCollections().ReloadCollections()
 }
 
@@ -2461,18 +2473,22 @@ func (m *Model) performNewFolder(name string, parent *components.TreeNode) {
 	m.leftPanel.GetCollections().ReloadCollections()
 }
 
-// performEditRequest updates a request's name, method, and URL
-func (m *Model) performEditRequest(node *components.TreeNode, name, method, url string) {
+// performEditRequest updates a request's name, method, protocol, and URL
+func (m *Model) performEditRequest(node *components.TreeNode, name, method, protocol, url string) {
 	if node == nil || name == "" {
 		return
 	}
 
-	if err := m.leftPanel.GetCollections().UpdateRequest(node, name, method, url); err != nil {
+	if err := m.leftPanel.GetCollections().UpdateRequest(node, name, method, protocol, url); err != nil {
 		m.statusBar.Error(err)
 		return
 	}
 
-	m.statusBar.Success("Updated", method+" "+name)
+	label := method
+	if protocol == "gRPC" {
+		label = "gRPC"
+	}
+	m.statusBar.Success("Updated", label+" "+name)
 	m.leftPanel.GetCollections().ReloadCollections()
 }
 

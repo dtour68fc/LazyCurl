@@ -73,6 +73,19 @@ func (t *Tabs) SetActive(index int) {
 	}
 }
 
+// SetItems replaces the tab list entirely (e.g. switching the request
+// editor between its HTTP tab set and its gRPC tab set). Resets the
+// active index to 0 if the current one would now be out of range, rather
+// than leaving ActiveIndex pointing past the end of the new, possibly
+// shorter, Items slice.
+func (t *Tabs) SetItems(items []string) {
+	t.Items = items
+	t.Shortcuts = make([]string, len(items))
+	if t.ActiveIndex >= len(items) {
+		t.ActiveIndex = 0
+	}
+}
+
 // GetActive returns the name of the active tab
 func (t *Tabs) GetActive() string {
 	if t.ActiveIndex >= 0 && t.ActiveIndex < len(t.Items) {

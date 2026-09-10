@@ -29,6 +29,7 @@ type TreeNode struct {
 	Expanded   bool        // Whether folder is expanded
 	HTTPMethod string      // HTTP method (only for RequestNode)
 	URL        string      // Request URL (only for RequestNode)
+	Protocol   string      // "" (== HTTP) or "grpc" (only for RequestNode)
 	Depth      int         // Nesting level (0 = root)
 	Parent     *TreeNode   // Reference to parent node
 }
@@ -161,6 +162,7 @@ func buildRequests(requests []api.CollectionRequest, depth int, parent *TreeNode
 			Type:       RequestNode,
 			HTTPMethod: string(r.Method),
 			URL:        r.URL,
+			Protocol:   string(r.Protocol),
 			Depth:      depth,
 			Parent:     parent,
 		})

@@ -489,3 +489,227 @@ func TestValidateCollection(t *testing.T) {
 		})
 	}
 }
+
+// TestRequestProtocolBackwardCompat verifies that a request JSON with no
+// "protocol" key at all (i.e. every collection file saved before gRPC
+// support existed) unmarshals with Protocol's zero value, and that zero
+// value is correctly treated as HTTP, not some invalid/unknown protocol.
+func TestRequestProtocolBackwardCompat(t *testing.T) {
+	legacyJSON := `{
+		"id": "req1",
+		"name": "Get Users",
+		"method": "GET",
+		"url": "https://api.example.com/users"
+	}`
+
+	var req CollectionRequest
+	if err := json.Unmarshal([]byte(legacyJSON), &req); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if req.Protocol != "" {
+		t.Errorf("Protocol = %q, want empty string for legacy request with no protocol field", req.Protocol)
+	}
+	if req.Protocol.IsGRPC() {
+		t.Errorf("IsGRPC() = true for legacy request, want false")
+	}
+	if got := req.Protocol.String(); got != "HTTP" {
+		t.Errorf("String() = %q, want %q", got, "HTTP")
+	}
+}
+
+// TestRequestProtocolGRPC verifies a request explicitly marked as gRPC
+// round-trips correctly through JSON, along with its GRPCConfig.
+func TestRequestProtocolGRPC(t *testing.T) {
+	grpcJSON := `{
+		"id": "req1",
+		"name": "Get User",
+		"protocol": "grpc",
+		"grpc": {
+			"server": "localhost:50051",
+			"service": "myapp.UserService",
+			"method": "GetUser",
+			"message": "{\"id\": 1}"
+		}
+	}`
+
+	var req CollectionRequest
+	if err := json.Unmarshal([]byte(grpcJSON), &req); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if !req.Protocol.IsGRPC() {
+		t.Errorf("IsGRPC() = false, want true")
+	}
+	if got := req.Protocol.String(); got != "gRPC" {
+		t.Errorf("String() = %q, want %q", got, "gRPC")
+	}
+	if req.GRPC == nil {
+		t.Fatalf("GRPC = nil, want populated GRPCConfig")
+	}
+	if req.GRPC.Server != "localhost:50051" {
+		t.Errorf("GRPC.Server = %q, want %q", req.GRPC.Server, "localhost:50051")
+	}
+	if req.GRPC.Service != "myapp.UserService" {
+		t.Errorf("GRPC.Service = %q, want %q", req.GRPC.Service, "myapp.UserService")
+	}
+
+	// Round-trip back to JSON and re-parse
+	data, err := json.Marshal(&req)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	var reparsed CollectionRequest
+	if err := json.Unmarshal(data, &reparsed); err != nil {
+		t.Fatalf("re-Unmarshal() error = %v", err)
+	}
+	if !reparsed.Protocol.IsGRPC() || reparsed.GRPC == nil || reparsed.GRPC.Server != "localhost:50051" {
+		t.Errorf("round-trip lost gRPC data: %+v", reparsed)
+	}
+}
+
+// TestDuplicateRequestPreservesGRPC verifies DuplicateRequest carries the
+// Protocol and GRPC fields over to the copy - a plain field-by-field
+// struct literal is easy to silently leave a new field off of.
+func TestDuplicateRequestPreservesGRPC(t *testing.T) {
+	col := &CollectionFile{
+		Name: "Test",
+		Requests: []CollectionRequest{
+			{
+				ID:       "req1",
+				Name:     "Get User",
+				Protocol: ProtocolGRPC,
+				GRPC: &GRPCConfig{
+					Server:  "localhost:50051",
+					Service: "myapp.UserService",
+					Method:  "GetUser",
+				},
+			},
+		},
+	}
+
+	dup := col.DuplicateRequest("req1")
+	if dup == nil {
+		t.Fatalf("DuplicateRequest() = nil")
+	}
+	if !dup.Protocol.IsGRPC() {
+		t.Errorf("duplicate Protocol = %q, want grpc", dup.Protocol)
+	}
+	if dup.GRPC == nil {
+		t.Fatalf("duplicate GRPC = nil, want populated GRPCConfig")
+	}
+	if dup.GRPC.Service != "myapp.UserService" {
+		t.Errorf("duplicate GRPC.Service = %q, want %q", dup.GRPC.Service, "myapp.UserService")
+	}
+
+	// Mutating the duplicate's GRPCConfig must not affect the original -
+	// copyGRPCConfig needs to be a real deep copy, not a shared pointer.
+	dup.GRPC.Service = "mutated"
+	if col.Requests[0].GRPC.Service != "myapp.UserService" {
+		t.Errorf("mutating duplicate leaked into original: %q", col.Requests[0].GRPC.Service)
+	}
+}
+
+// TestCopyRequestToFolderPreservesGRPC mirrors TestDuplicateRequestPreservesGRPC
+// for the other copy path (copying a request into a folder).
+func TestCopyRequestToFolderPreservesGRPC(t *testing.T) {
+	col := &CollectionFile{
+		Name: "Test",
+		Requests: []CollectionRequest{
+			{
+				ID:       "req1",
+				Name:     "Get User",
+				Protocol: ProtocolGRPC,
+				GRPC:     &GRPCConfig{Server: "localhost:50051"},
+			},
+		},
+		Folders: []Folder{
+			{Name: "Target"},
+		},
+	}
+
+	copied := col.CopyRequestToFolder("req1", []string{"Target"})
+	if copied == nil {
+		t.Fatalf("CopyRequestToFolder() = nil")
+	}
+	if !copied.Protocol.IsGRPC() {
+		t.Errorf("copied Protocol = %q, want grpc", copied.Protocol)
+	}
+	if copied.GRPC == nil || copied.GRPC.Server != "localhost:50051" {
+		t.Errorf("copied GRPC = %+v, want Server=localhost:50051", copied.GRPC)
+	}
+}
+
+// TestDuplicateFolderPreservesGRPC verifies copyFolder (used by
+// DuplicateFolder) also carries Protocol/GRPC over for every request nested
+// inside the folder being duplicated.
+func TestDuplicateFolderPreservesGRPC(t *testing.T) {
+	col := &CollectionFile{
+		Name: "Test",
+		Folders: []Folder{
+			{
+				Name: "Original",
+				Requests: []CollectionRequest{
+					{
+						ID:       "req1",
+						Name:     "Get User",
+						Protocol: ProtocolGRPC,
+						GRPC:     &GRPCConfig{Server: "localhost:50051"},
+					},
+				},
+			},
+		},
+	}
+
+	dupFolder := col.DuplicateFolder([]string{}, "Original")
+	if dupFolder == nil {
+		t.Fatalf("DuplicateFolder() = nil")
+	}
+	if len(dupFolder.Requests) != 1 {
+		t.Fatalf("duplicate folder has %d requests, want 1", len(dupFolder.Requests))
+	}
+	req := dupFolder.Requests[0]
+	if !req.Protocol.IsGRPC() {
+		t.Errorf("duplicated nested request Protocol = %q, want grpc", req.Protocol)
+	}
+	if req.GRPC == nil || req.GRPC.Server != "localhost:50051" {
+		t.Errorf("duplicated nested request GRPC = %+v, want Server=localhost:50051", req.GRPC)
+	}
+}
+
+// TestUpdateRequestGRPCMessage verifies UpdateRequestGRPCMessage creates a
+// GRPCConfig on demand (for a request that doesn't have one yet) and
+// otherwise only touches Message, leaving Server/Service/Method alone.
+func TestUpdateRequestGRPCMessage(t *testing.T) {
+	col := &CollectionFile{
+		Name: "Test",
+		Requests: []CollectionRequest{
+			{ID: "req1", Name: "No GRPC yet", Protocol: ProtocolGRPC},
+			{ID: "req2", Name: "Has GRPC", Protocol: ProtocolGRPC, GRPC: &GRPCConfig{
+				Server:  "localhost:50051",
+				Service: "myapp.UserService",
+			}},
+		},
+	}
+
+	if ok := col.UpdateRequestGRPCMessage("req1", `{"id": 1}`); !ok {
+		t.Fatalf("UpdateRequestGRPCMessage(req1) = false, want true")
+	}
+	if col.Requests[0].GRPC == nil || col.Requests[0].GRPC.Message != `{"id": 1}` {
+		t.Errorf("req1 GRPC = %+v, want Message set", col.Requests[0].GRPC)
+	}
+
+	if ok := col.UpdateRequestGRPCMessage("req2", `{"id": 2}`); !ok {
+		t.Fatalf("UpdateRequestGRPCMessage(req2) = false, want true")
+	}
+	if col.Requests[1].GRPC.Message != `{"id": 2}` {
+		t.Errorf("req2 GRPC.Message = %q, want %q", col.Requests[1].GRPC.Message, `{"id": 2}`)
+	}
+	if col.Requests[1].GRPC.Server != "localhost:50051" || col.Requests[1].GRPC.Service != "myapp.UserService" {
+		t.Errorf("req2 GRPC lost existing Server/Service: %+v", col.Requests[1].GRPC)
+	}
+
+	if ok := col.UpdateRequestGRPCMessage("nonexistent", "x"); ok {
+		t.Errorf("UpdateRequestGRPCMessage(nonexistent) = true, want false")
+	}
+}
