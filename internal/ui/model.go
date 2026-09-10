@@ -2801,6 +2801,16 @@ func (m *Model) flushPendingRequestEdits() {
 
 // sendHTTPRequest builds and sends an HTTP request from the current request panel state
 func (m Model) sendHTTPRequest() (tea.Model, tea.Cmd) {
+	// gRPC invocation isn't wired up yet (v1 scope was just the protocol
+	// toggle + dynamic tabs) - without this check, ctrl+s falls through
+	// to the HTTP send path below, which tries to net/http.Do a
+	// "grpc://host:port" URL and fails with a confusing raw Go error
+	// ("unsupported protocol scheme") instead of a clean status message.
+	if m.requestPanel.GetProtocol().IsGRPC() {
+		m.statusBar.Info("gRPC invoke isn't implemented yet - toggle + tabs only for now")
+		return m, nil
+	}
+
 	// Check if a request is loaded
 	url := m.requestPanel.GetURL()
 	if url == "" {
