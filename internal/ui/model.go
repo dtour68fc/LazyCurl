@@ -1099,6 +1099,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case RequestEditMsg:
+		if msg.Tab == "Server" {
+			// Server tab rows are a fixed schema (Server/Service/Method/
+			// TLS/...) - only the value should ever be editable, never
+			// the key, so this uses the plain single-field input dialog
+			// instead of the free-form key+value one.
+			m.dialog.ShowInput(
+				"Edit "+msg.Key,
+				"",
+				msg.Value,
+				"server_edit_value",
+				&requestDialogContext{Tab: msg.Tab, Index: msg.Index, Key: msg.Key},
+			)
+			return m, nil
+		}
 		// Handle edit - show key-value input dialog
 		m.dialog.ShowKeyValue(
 			"Edit Entry",
@@ -2326,6 +2340,8 @@ func (m Model) handleDialogResult(msg components.DialogResultMsg) (tea.Model, te
 				m.syncParamsAndSave()
 			} else if ctx.Tab == "PathParams" {
 				m.syncPathParamsAndSave(ctx.Index, msg.Value)
+			} else if ctx.Tab == "Metadata" {
+				m.saveGRPCServerConfig()
 			}
 		}
 	case "request_delete":
@@ -2338,6 +2354,8 @@ func (m Model) handleDialogResult(msg components.DialogResultMsg) (tea.Model, te
 			} else if ctx.Tab == "PathParams" {
 				// Remove path param from URL
 				m.removePathParamFromURL(ctx.Key)
+			} else if ctx.Tab == "Metadata" {
+				m.saveGRPCServerConfig()
 			}
 		}
 	case "request_edit":
@@ -2348,8 +2366,31 @@ func (m Model) handleDialogResult(msg components.DialogResultMsg) (tea.Model, te
 			// Sync params to URL and save if Params tab
 			if ctx.Tab == "Params" {
 				m.syncParamsAndSave()
+			} else if ctx.Tab == "Metadata" {
+				m.saveGRPCServerConfig()
 			}
 			// Note: PathParams edit updates the value, not the key (which is in URL)
+		}
+	case "server_edit_value":
+		// Server tab value-only edit (see RequestEditMsg handling below) -
+		// key is locked, only Value ever changes.
+		if ctx, ok := msg.Context.(*requestDialogContext); ok {
+			value := msg.Value
+			// TLS and Skip Verify are boolean-ish free-text fields -
+			// normalize whatever was typed to a clean "true"/"false"
+			// rather than trusting exact casing/spelling.
+			if ctx.Key == "TLS" || ctx.Key == "  Skip Verify" {
+				value = "false"
+				if strings.EqualFold(msg.Value, "true") {
+					value = "true"
+				}
+			}
+			m.requestPanel.UpdateRow(ctx.Index, ctx.Key, value)
+			if ctx.Key == "TLS" {
+				m.requestPanel.SyncGRPCTLSRows()
+			}
+			m.statusBar.Success("Updated", ctx.Key)
+			m.saveGRPCServerConfig()
 		}
 	case "request_new":
 		if ctx, ok := msg.Context.(*requestDialogContext); ok && msg.Value != "" {
@@ -2365,6 +2406,8 @@ func (m Model) handleDialogResult(msg components.DialogResultMsg) (tea.Model, te
 				// Sync params to URL and save if Params tab
 				if ctx.Tab == "Params" {
 					m.syncParamsAndSave()
+				} else if ctx.Tab == "Metadata" {
+					m.saveGRPCServerConfig()
 				}
 			}
 		}
@@ -2505,6 +2548,25 @@ func (m *Model) performDuplicate(node *components.TreeNode) {
 
 	m.statusBar.Success("Duplicated", node.Name)
 	m.leftPanel.GetCollections().ReloadCollections()
+}
+
+// saveGRPCServerConfig persists the current Server + Metadata tab state
+// (server/service/method/TLS/metadata) to the collection, keyed off
+// whatever request is currently loaded in the request panel. Message is
+// tracked/saved separately via UpdateRequestGRPCMessageByID, so it isn't
+// touched here.
+func (m *Model) saveGRPCServerConfig() {
+	requestID := m.requestPanel.GetCurrentRequestID()
+	if requestID == "" {
+		return
+	}
+	cfg := m.requestPanel.GetGRPCConfig()
+	if cfg == nil {
+		return
+	}
+	if err := m.leftPanel.GetCollections().UpdateRequestGRPCServerByID(requestID, cfg); err != nil {
+		m.statusBar.Error(err)
+	}
 }
 
 // syncParamsAndSave syncs the params table to URL and saves to collection

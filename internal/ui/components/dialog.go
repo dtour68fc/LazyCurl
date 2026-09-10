@@ -211,7 +211,11 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 				confirmed = d.focusField == 0
 			} else if d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest {
 				confirmed = !d.isOnCancelFocus()
-				method = httpMethods[d.methodIndex]
+				if d.isGRPC() {
+					method = "INVOKE"
+				} else {
+					method = httpMethods[d.methodIndex]
+				}
 				protocol = requestProtocols[d.protocolIndex]
 				url = d.urlValue
 			} else if d.dialogType == DialogKeyValue {
@@ -299,8 +303,9 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 1 {
 				// Change protocol with h/l on protocol selector
 				d.protocolIndex = (d.protocolIndex + len(requestProtocols) - 1) % len(requestProtocols)
-			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 2 {
-				// Change method with h/l on method selector
+			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 2 && !d.isGRPC() {
+				// Change method with h/l on method selector - locked to
+				// INVOKE (no-op) when protocol is gRPC
 				d.methodIndex = (d.methodIndex + len(httpMethods) - 1) % len(httpMethods)
 			} else {
 				// Type 'h' in text field
@@ -332,8 +337,9 @@ func (d *Dialog) Update(msg tea.Msg) (*Dialog, tea.Cmd) {
 			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 1 {
 				// Change protocol with h/l on protocol selector
 				d.protocolIndex = (d.protocolIndex + 1) % len(requestProtocols)
-			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 2 {
-				// Change method with h/l on method selector
+			} else if (d.dialogType == DialogNewRequest || d.dialogType == DialogEditRequest) && d.focusField == 2 && !d.isGRPC() {
+				// Change method with h/l on method selector - locked to
+				// INVOKE (no-op) when protocol is gRPC
 				d.methodIndex = (d.methodIndex + 1) % len(httpMethods)
 			} else {
 				// Type 'l' in text field
@@ -744,8 +750,19 @@ func (d *Dialog) renderConfirmForm(width int) string {
 	return content.String()
 }
 
-// renderMethodSelector renders the HTTP method selector
+// renderMethodSelector renders the HTTP method selector - locked to a
+// fixed "INVOKE" badge (no arrows, not navigable) when the protocol
+// selector is set to gRPC, since gRPC doesn't have HTTP methods at all.
 func (d *Dialog) renderMethodSelector(width int, active bool) string {
+	if d.isGRPC() {
+		lockedStyle := lipgloss.NewStyle().
+			Background(styles.Mauve).
+			Foreground(styles.Crust).
+			Bold(true).
+			Padding(0, 1)
+		return lockedStyle.Render("INVOKE")
+	}
+
 	// Only show the selected method with arrows for navigation
 	method := httpMethods[d.methodIndex]
 	bg, fg := d.getMethodColors(method)
@@ -764,6 +781,11 @@ func (d *Dialog) renderMethodSelector(width int, active bool) string {
 
 	// No background on container - transparent like other fields
 	return content
+}
+
+// isGRPC returns true if the protocol selector is currently set to gRPC
+func (d *Dialog) isGRPC() bool {
+	return requestProtocols[d.protocolIndex] == "gRPC"
 }
 
 // getMethodColors returns the background and foreground colors for an HTTP method

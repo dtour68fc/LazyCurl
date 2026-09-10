@@ -369,6 +369,92 @@ func (r *RequestView) isBodyLikeTab() bool {
 	return active == "Body" || active == "Message"
 }
 
+// isServerTab returns true when the gRPC Server tab is active - its rows
+// are a fixed schema (Server/Service/Method/TLS/...), unlike the free-form
+// Headers/Params/Metadata tables, so structural edits (add/delete/
+// rename/duplicate/paste row) are blocked there; only a row's Value is
+// ever editable.
+func (r *RequestView) isServerTab() bool {
+	return r.tabs.GetActive() == "Server"
+}
+
+// grpcServerBaseRowCount is the number of always-present Server tab rows
+// (Server, Service, Method, TLS) before any TLS sub-fields get appended.
+const grpcServerBaseRowCount = 4
+
+// grpcTLSSubFieldKeys are the nested rows shown under "TLS" once it's
+// enabled - two-space indented so they read as belonging to it, matching
+// the reference layout of Cert/Key/CA/server name grouped under TLS.
+var grpcTLSSubFieldKeys = []string{"  Cert File", "  Key File", "  CA File", "  Server Name", "  Skip Verify"}
+
+// SyncGRPCTLSRows adds or removes the nested TLS sub-field rows in
+// grpcServerTable to match the current TLS row's value ("true" enables
+// them, anything else removes them). Editing a table cell doesn't know
+// anything about sibling rows, so this needs to be called explicitly
+// after the TLS row's value changes.
+func (r *RequestView) SyncGRPCTLSRows() {
+	if len(r.grpcServerTable.Rows) < grpcServerBaseRowCount {
+		return
+	}
+	enabled := strings.EqualFold(r.grpcServerTable.Rows[3].Value, "true")
+	hasSubRows := len(r.grpcServerTable.Rows) > grpcServerBaseRowCount
+
+	if enabled && !hasSubRows {
+		r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[0], "")
+		r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[1], "")
+		r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[2], "")
+		r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[3], "")
+		r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[4], "false")
+	} else if !enabled && hasSubRows {
+		r.grpcServerTable.Rows = r.grpcServerTable.Rows[:grpcServerBaseRowCount]
+		if r.grpcServerTable.Cursor >= len(r.grpcServerTable.Rows) {
+			r.grpcServerTable.Cursor = len(r.grpcServerTable.Rows) - 1
+		}
+	}
+}
+
+// GetGRPCConfig builds a *api.GRPCConfig from the current Server/Metadata
+// tab state - the reverse of loading one in LoadCollectionRequest. Used
+// when saving Server tab edits back to the collection.
+func (r *RequestView) GetGRPCConfig() *api.GRPCConfig {
+	if len(r.grpcServerTable.Rows) < grpcServerBaseRowCount {
+		return nil
+	}
+	rows := r.grpcServerTable.Rows
+
+	cfg := &api.GRPCConfig{
+		Server:  rows[0].Value,
+		Service: rows[1].Value,
+		Method:  rows[2].Value,
+	}
+
+	if strings.EqualFold(rows[3].Value, "true") {
+		tls := &api.GRPCTLSConfig{Enabled: true}
+		if len(rows) > grpcServerBaseRowCount {
+			tls.CertFile = rows[4].Value
+			tls.KeyFile = rows[5].Value
+			tls.CAFile = rows[6].Value
+			tls.ServerName = rows[7].Value
+			tls.InsecureSkipVerify = strings.EqualFold(rows[8].Value, "true")
+		}
+		cfg.TLS = tls
+	}
+
+	for _, row := range r.grpcMetadataTable.Rows {
+		if row.Key != "" {
+			cfg.Metadata = append(cfg.Metadata, api.KeyValueEntry{
+				Key: row.Key, Value: row.Value, Enabled: row.Enabled,
+			})
+		}
+	}
+
+	// Message lives in bodyEditor, not these tables - callers that need it
+	// (e.g. persisting a Message tab edit) already go through
+	// UpdateRequestGRPCMessageByID separately, so it's not duplicated here.
+
+	return cfg
+}
+
 // rebuildTabsForProtocol swaps the visible tab set to match the given
 // protocol (HTTP's Params/Authorization/Headers/Body/Scripts vs gRPC's
 // Server/Metadata/Message/Scripts) and resets to the first tab. gRPC's
@@ -854,7 +940,12 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 				}
 
 			case "R":
-				// Rename key
+				// Rename key - blocked on the Server tab, whose rows are a
+				// fixed schema (Server/Service/Method/TLS/...), not
+				// free-form entries like Headers/Metadata/Params.
+				if r.isServerTab() {
+					break
+				}
 				if table.Cursor >= 0 && table.Cursor < table.RowCount() {
 					row := table.Rows[table.Cursor]
 					return r, func() tea.Msg {
@@ -868,7 +959,11 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 				}
 
 			case "d":
-				// Delete current row
+				// Delete current row - blocked on the Server tab (can't
+				// delete a fixed field)
+				if r.isServerTab() {
+					break
+				}
 				if table.Cursor >= 0 && table.Cursor < table.RowCount() {
 					row := table.Rows[table.Cursor]
 					return r, func() tea.Msg {
@@ -881,7 +976,10 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 				}
 
 			case "D":
-				// Duplicate current row
+				// Duplicate current row - blocked on the Server tab
+				if r.isServerTab() {
+					break
+				}
 				if table.Cursor >= 0 && table.Cursor < table.RowCount() {
 					return r, func() tea.Msg {
 						return RequestDuplicateMsg{
@@ -906,7 +1004,11 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 				}
 
 			case "p":
-				// Paste
+				// Paste - blocked on the Server tab (would add a
+				// free-form row, which doesn't fit the fixed schema)
+				if r.isServerTab() {
+					break
+				}
 				return r, func() tea.Msg {
 					return RequestPasteMsg{
 						Tab: r.getTabName(),
@@ -914,7 +1016,11 @@ func (r RequestView) Update(msg tea.Msg, cfg *config.GlobalConfig) (RequestView,
 				}
 
 			case "n":
-				// New query param (in Params tab) or new header
+				// New query param (in Params tab) or new header - blocked
+				// on the Server tab (fixed schema, no arbitrary new rows)
+				if r.isServerTab() {
+					break
+				}
 				return r, func() tea.Msg {
 					return RequestNewMsg{
 						Tab: r.getTabName(),
@@ -1592,6 +1698,8 @@ func (r *RequestView) getMethodStyle() (lipgloss.Color, lipgloss.Color) {
 		return styles.MethodHeadBg, styles.MethodHeadFg
 	case api.OPTIONS:
 		return styles.MethodOptionsBg, styles.MethodOptionsFg
+	case api.Invoke:
+		return styles.Mauve, styles.Crust
 	default:
 		return styles.MethodGetBg, styles.MethodGetFg
 	}
@@ -2257,8 +2365,13 @@ func (r *RequestView) LoadCollectionRequest(req *api.CollectionRequest) {
 	// below (forced to JSONBody for gRPC's Message tab).
 	r.rebuildTabsForProtocol(req.Protocol)
 
-	// Set HTTP method
+	// Set HTTP method (gRPC requests always show/store "INVOKE" - they
+	// don't have HTTP methods, and this is enforced regardless of
+	// whatever's actually stored on disk, in case it drifted)
 	r.method = req.Method
+	if req.Protocol.IsGRPC() {
+		r.method = api.Invoke
+	}
 
 	// Set URL
 	r.url = req.URL
@@ -2266,7 +2379,9 @@ func (r *RequestView) LoadCollectionRequest(req *api.CollectionRequest) {
 	// Load gRPC-specific fields (server/service/method/TLS + metadata).
 	// Table rows are always reset to the fixed 4-row shape even if the
 	// stored GRPCConfig is nil (brand new gRPC request), so the tab isn't
-	// just blank.
+	// just blank. TLS sub-rows (cert/key/CA/server name/skip-verify) are
+	// only appended if TLS was actually enabled - SyncGRPCTLSRows() is
+	// what adds/removes them in response to editing the TLS row later.
 	r.grpcServerTable.Rows = nil
 	r.grpcServerTable.AddRow("Server", "")
 	r.grpcServerTable.AddRow("Service", "")
@@ -2277,8 +2392,17 @@ func (r *RequestView) LoadCollectionRequest(req *api.CollectionRequest) {
 		r.grpcServerTable.Rows[0].Value = req.GRPC.Server
 		r.grpcServerTable.Rows[1].Value = req.GRPC.Service
 		r.grpcServerTable.Rows[2].Value = req.GRPC.Method
-		if req.GRPC.UseTLS {
+		if req.GRPC.TLS != nil && req.GRPC.TLS.Enabled {
 			r.grpcServerTable.Rows[3].Value = "true"
+			r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[0], req.GRPC.TLS.CertFile)
+			r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[1], req.GRPC.TLS.KeyFile)
+			r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[2], req.GRPC.TLS.CAFile)
+			r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[3], req.GRPC.TLS.ServerName)
+			skipVerify := "false"
+			if req.GRPC.TLS.InsecureSkipVerify {
+				skipVerify = "true"
+			}
+			r.grpcServerTable.AddRow(grpcTLSSubFieldKeys[4], skipVerify)
 		}
 		for _, md := range req.GRPC.Metadata {
 			r.grpcMetadataTable.AddRowWithState(md.Key, md.Value, md.Enabled)

@@ -444,6 +444,21 @@ func (c *CollectionsView) UpdateRequestGRPCMessageByID(requestID, message string
 	return nil
 }
 
+// UpdateRequestGRPCServerByID finds a request by ID across all collections and updates its Server/Service/Method/TLS/Metadata gRPC config
+func (c *CollectionsView) UpdateRequestGRPCServerByID(requestID string, cfg *api.GRPCConfig) error {
+	if requestID == "" {
+		return nil
+	}
+
+	for _, col := range c.collections {
+		if col.UpdateRequestGRPCServer(requestID, cfg) {
+			return col.Save()
+		}
+	}
+
+	return nil
+}
+
 // UpdateRequestScriptsByID finds a request by ID across all collections and updates its scripts
 func (c *CollectionsView) UpdateRequestScriptsByID(requestID, preRequest, postRequest string) error {
 	if requestID == "" {

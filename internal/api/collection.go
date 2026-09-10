@@ -68,6 +68,20 @@ func (p RequestProtocol) String() string {
 	return "HTTP"
 }
 
+// GRPCTLSConfig holds gRPC transport security settings. A plain bool isn't
+// enough here - "TLS on" alone only covers the case of a public CA and no
+// client identity. Real internal gRPC servers commonly want mTLS (client
+// cert+key), a private CA, and/or a server-name override when the dial
+// address and the certificate's CN/SAN don't match.
+type GRPCTLSConfig struct {
+	Enabled            bool   `json:"enabled,omitempty"`
+	CertFile           string `json:"cert_file,omitempty"`            // client cert, for mTLS
+	KeyFile            string `json:"key_file,omitempty"`             // client key, for mTLS
+	CAFile             string `json:"ca_file,omitempty"`              // verify server against this CA instead of the system roots
+	ServerName         string `json:"server_name,omitempty"`          // SNI / cert CN-SAN override, when it differs from Server's host
+	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty"` // dev-only escape hatch - skip server cert verification entirely
+}
+
 // GRPCConfig holds gRPC-specific request configuration - the gRPC
 // counterpart to BodyConfig/AuthConfig above. Server reflection (or a
 // supplied ProtoFile, for servers without reflection enabled) does the
@@ -79,7 +93,7 @@ type GRPCConfig struct {
 	Method    string          `json:"method,omitempty"`     // method name within Service
 	Message   string          `json:"message,omitempty"`    // request message as JSON, matching the method's input type
 	Metadata  []KeyValueEntry `json:"metadata,omitempty"`   // gRPC metadata - same shape as HTTP headers
-	UseTLS    bool            `json:"use_tls,omitempty"`
+	TLS       *GRPCTLSConfig  `json:"tls,omitempty"`
 	ProtoFile string          `json:"proto_file,omitempty"` // optional - only needed if Server doesn't support reflection
 }
 
@@ -623,6 +637,23 @@ func (c *CollectionFile) UpdateRequestGRPCMessage(id, message string) bool {
 	return true
 }
 
+// UpdateRequestGRPCServer updates the Server/Service/Method/TLS/Metadata
+// portion of a request's GRPCConfig by ID - the counterpart to
+// UpdateRequestGRPCMessage, covering everything except Message. Preserves
+// whatever Message was already set (cfg is expected to come from the UI's
+// Server/Metadata tab state, which doesn't track Message at all).
+func (c *CollectionFile) UpdateRequestGRPCServer(id string, cfg *GRPCConfig) bool {
+	req := c.FindRequest(id)
+	if req == nil || cfg == nil {
+		return false
+	}
+	if req.GRPC != nil {
+		cfg.Message = req.GRPC.Message
+	}
+	req.GRPC = cfg
+	return true
+}
+
 // UpdateRequestScripts updates the scripts of a request by ID
 func (c *CollectionFile) UpdateRequestScripts(id, preRequest, postRequest string) bool {
 	req := c.FindRequest(id)
@@ -779,9 +810,18 @@ func copyGRPCConfig(g *GRPCConfig) *GRPCConfig {
 		Method:    g.Method,
 		Message:   g.Message,
 		Metadata:  copyHeaders(g.Metadata),
-		UseTLS:    g.UseTLS,
+		TLS:       copyGRPCTLSConfig(g.TLS),
 		ProtoFile: g.ProtoFile,
 	}
+}
+
+// copyGRPCTLSConfig creates a copy of gRPC TLS config
+func copyGRPCTLSConfig(t *GRPCTLSConfig) *GRPCTLSConfig {
+	if t == nil {
+		return nil
+	}
+	cp := *t
+	return &cp
 }
 
 // addRequestAfter adds a request after another request with given ID

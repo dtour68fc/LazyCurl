@@ -25,6 +25,13 @@ const (
 	DELETE  HTTPMethod = "DELETE"
 	HEAD    HTTPMethod = "HEAD"
 	OPTIONS HTTPMethod = "OPTIONS"
+
+	// Invoke isn't a real HTTP verb - it's the fixed "method" shown/stored
+	// for gRPC requests, which don't have HTTP methods at all. Reusing the
+	// HTTPMethod string type here (rather than adding a parallel field)
+	// keeps CollectionRequest.Method meaningful for both protocols instead
+	// of being blank/nonsensical for gRPC ones.
+	Invoke HTTPMethod = "INVOKE"
 )
 
 // Request represents an HTTP request

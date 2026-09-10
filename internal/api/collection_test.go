@@ -713,3 +713,154 @@ func TestUpdateRequestGRPCMessage(t *testing.T) {
 		t.Errorf("UpdateRequestGRPCMessage(nonexistent) = true, want false")
 	}
 }
+
+// TestGRPCTLSConfigRoundTrip verifies GRPCTLSConfig (mTLS: cert/key/CA/
+// server name/skip-verify) round-trips through JSON correctly, and that
+// the plain-TLS-no-client-cert case (just Enabled) doesn't require the
+// other fields.
+func TestGRPCTLSConfigRoundTrip(t *testing.T) {
+	req := CollectionRequest{
+		ID:       "req1",
+		Name:     "Create Employee",
+		Protocol: ProtocolGRPC,
+		GRPC: &GRPCConfig{
+			Server:  "localhost:29010",
+			Service: "employee.v1.EmployeeService",
+			Method:  "CreateEmployee",
+			TLS: &GRPCTLSConfig{
+				Enabled:    true,
+				CertFile:   "/home/davis/certs/client.crt",
+				KeyFile:    "/home/davis/certs/client.key",
+				CAFile:     "/home/davis/certs/ca.crt",
+				ServerName: "localhost",
+			},
+		},
+	}
+
+	data, err := json.Marshal(&req)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	var reparsed CollectionRequest
+	if err := json.Unmarshal(data, &reparsed); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if reparsed.GRPC == nil || reparsed.GRPC.TLS == nil {
+		t.Fatalf("round-trip lost TLS config: %+v", reparsed.GRPC)
+	}
+	tls := reparsed.GRPC.TLS
+	if !tls.Enabled {
+		t.Errorf("TLS.Enabled = false, want true")
+	}
+	if tls.CertFile != "/home/davis/certs/client.crt" {
+		t.Errorf("TLS.CertFile = %q, want %q", tls.CertFile, "/home/davis/certs/client.crt")
+	}
+	if tls.KeyFile != "/home/davis/certs/client.key" {
+		t.Errorf("TLS.KeyFile = %q, want %q", tls.KeyFile, "/home/davis/certs/client.key")
+	}
+	if tls.CAFile != "/home/davis/certs/ca.crt" {
+		t.Errorf("TLS.CAFile = %q, want %q", tls.CAFile, "/home/davis/certs/ca.crt")
+	}
+	if tls.ServerName != "localhost" {
+		t.Errorf("TLS.ServerName = %q, want %q", tls.ServerName, "localhost")
+	}
+	if tls.InsecureSkipVerify {
+		t.Errorf("TLS.InsecureSkipVerify = true, want false (never set)")
+	}
+}
+
+// TestCopyGRPCConfigDeepCopiesTLS verifies DuplicateRequest's copy of a
+// GRPCConfig with TLS set is a real deep copy of the nested TLS struct
+// too, not a shared pointer - mutating the duplicate's TLS must not affect
+// the original's.
+func TestCopyGRPCConfigDeepCopiesTLS(t *testing.T) {
+	col := &CollectionFile{
+		Name: "Test",
+		Requests: []CollectionRequest{
+			{
+				ID:       "req1",
+				Name:     "Notify Create",
+				Protocol: ProtocolGRPC,
+				GRPC: &GRPCConfig{
+					Server: "localhost:29020",
+					TLS: &GRPCTLSConfig{
+						Enabled:  true,
+						CertFile: "/certs/client.crt",
+					},
+				},
+			},
+		},
+	}
+
+	dup := col.DuplicateRequest("req1")
+	if dup == nil || dup.GRPC == nil || dup.GRPC.TLS == nil {
+		t.Fatalf("DuplicateRequest() = %+v, want populated GRPC.TLS", dup)
+	}
+
+	dup.GRPC.TLS.CertFile = "/mutated/cert.crt"
+	dup.GRPC.TLS.Enabled = false
+
+	original := col.Requests[0].GRPC.TLS
+	if original.CertFile != "/certs/client.crt" {
+		t.Errorf("mutating duplicate's TLS leaked into original CertFile: %q", original.CertFile)
+	}
+	if !original.Enabled {
+		t.Errorf("mutating duplicate's TLS leaked into original Enabled")
+	}
+}
+
+// TestUpdateRequestGRPCServer verifies UpdateRequestGRPCServer replaces
+// Server/Service/Method/TLS/Metadata wholesale but preserves whatever
+// Message was already set (Message is tracked separately by the UI, via
+// UpdateRequestGRPCMessage, and isn't part of the Server/Metadata tab
+// state this method is fed from).
+func TestUpdateRequestGRPCServer(t *testing.T) {
+	col := &CollectionFile{
+		Name: "Test",
+		Requests: []CollectionRequest{
+			{
+				ID:       "req1",
+				Name:     "Create Employee",
+				Protocol: ProtocolGRPC,
+				GRPC: &GRPCConfig{
+					Server:  "localhost:29010",
+					Message: `{"first_name": "Test"}`,
+				},
+			},
+		},
+	}
+
+	newCfg := &GRPCConfig{
+		Server:  "localhost:29011",
+		Service: "employee.v1.EmployeeService",
+		Method:  "CreateEmployee",
+		TLS:     &GRPCTLSConfig{Enabled: true, CAFile: "/certs/ca.crt"},
+	}
+
+	if ok := col.UpdateRequestGRPCServer("req1", newCfg); !ok {
+		t.Fatalf("UpdateRequestGRPCServer() = false, want true")
+	}
+
+	got := col.Requests[0].GRPC
+	if got.Server != "localhost:29011" {
+		t.Errorf("Server = %q, want %q", got.Server, "localhost:29011")
+	}
+	if got.Service != "employee.v1.EmployeeService" {
+		t.Errorf("Service = %q, want %q", got.Service, "employee.v1.EmployeeService")
+	}
+	if got.TLS == nil || !got.TLS.Enabled || got.TLS.CAFile != "/certs/ca.crt" {
+		t.Errorf("TLS = %+v, want Enabled with CAFile=/certs/ca.crt", got.TLS)
+	}
+	if got.Message != `{"first_name": "Test"}` {
+		t.Errorf("Message = %q, want preserved %q", got.Message, `{"first_name": "Test"}`)
+	}
+
+	if ok := col.UpdateRequestGRPCServer("nonexistent", newCfg); ok {
+		t.Errorf("UpdateRequestGRPCServer(nonexistent) = true, want false")
+	}
+	if ok := col.UpdateRequestGRPCServer("req1", nil); ok {
+		t.Errorf("UpdateRequestGRPCServer(req1, nil) = true, want false")
+	}
+}
