@@ -2942,6 +2942,27 @@ func (m Model) sendGRPCRequest() (tea.Model, tea.Cmd) {
 	// filling in separately.
 	cfg.Message = m.requestPanel.GetBodyContent()
 
+	// Replace {{env_var}} placeholders, same as buildHTTPRequest() does
+	// for URL/headers - without this, a Server value like
+	// "localhost:{{server_port}}" gets dialed literally (colon and all)
+	// instead of resolving to the active environment's actual port,
+	// which fails as an opaque "Unavailable" reflection error that looks
+	// like a real connectivity problem instead of an unresolved template.
+	envVars := m.leftPanel.GetEnvironments().GetActiveEnvironmentVariables()
+	cfg.Server = replaceVariables(cfg.Server, envVars)
+	cfg.Service = replaceVariables(cfg.Service, envVars)
+	cfg.Method = replaceVariables(cfg.Method, envVars)
+	cfg.Message = replaceVariables(cfg.Message, envVars)
+	for i, kv := range cfg.Metadata {
+		cfg.Metadata[i].Value = replaceVariables(kv.Value, envVars)
+	}
+	if cfg.TLS != nil {
+		cfg.TLS.CertFile = replaceVariables(cfg.TLS.CertFile, envVars)
+		cfg.TLS.KeyFile = replaceVariables(cfg.TLS.KeyFile, envVars)
+		cfg.TLS.CAFile = replaceVariables(cfg.TLS.CAFile, envVars)
+		cfg.TLS.ServerName = replaceVariables(cfg.TLS.ServerName, envVars)
+	}
+
 	if cfg.Server == "" || cfg.Service == "" || cfg.Method == "" {
 		m.statusBar.Info("Server/Service/Method all need to be set (Server tab)")
 		return m, nil
