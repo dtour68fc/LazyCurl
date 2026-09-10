@@ -46,6 +46,14 @@ type HTTPResponseMsg struct {
 	Error    error
 }
 
+// GRPCResponseMsg is sent when a gRPC invoke completes (success or
+// failure) - same shape as HTTPResponseMsg since api.InvokeGRPC returns
+// its result wrapped in the same *api.Response type HTTP uses.
+type GRPCResponseMsg struct {
+	Response *api.Response
+	Error    error
+}
+
 // HTTPSendingMsg is sent when an HTTP request starts
 type HTTPSendingMsg struct{}
 
@@ -94,6 +102,15 @@ func SendHTTPRequestCmd(req *api.Request, tlsCfg EnvTLSConfig) tea.Cmd {
 		}
 		resp, err := client.Send(req)
 		return HTTPResponseMsg{Response: resp, Error: err}
+	}
+}
+
+// SendGRPCRequestCmd invokes a unary gRPC call via server reflection - see
+// api.InvokeGRPC for the dial/reflect/build-message/invoke mechanics.
+func SendGRPCRequestCmd(cfg *api.GRPCConfig) tea.Cmd {
+	return func() tea.Msg {
+		resp, err := api.InvokeGRPC(cfg)
+		return GRPCResponseMsg{Response: resp, Error: err}
 	}
 }
 
@@ -1610,6 +1627,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case GRPCResponseMsg:
+		// gRPC invoke completed (success or failure) - unlike HTTP, a
+		// failure still carries a *Response (the gRPC status code +
+		// message), so the response panel gets populated either way,
+		// same as InvokeGRPC's contract.
+		m.isSending = false
+		m.responsePanel.SetLoading(false)
+		duration := time.Since(m.requestStart)
+
+		// Log to console history
+		if m.lastRequest != nil && m.consoleHistory != nil {
+			entry := api.NewConsoleEntry(m.lastRequest, msg.Response, msg.Error, duration)
+			m.consoleHistory.Add(*entry)
+		}
+
+		if msg.Response != nil {
+			headers := make(map[string]string)
+			for key, values := range msg.Response.Headers {
+				if len(values) > 0 {
+					headers[key] = strings.Join(values, ", ")
+				}
+			}
+			timeStr := formatDuration(msg.Response.Time)
+			sizeStr := formatBytes(msg.Response.Size)
+
+			// gRPC has no cookies - Cookies tab just stays empty
+			m.responsePanel.SetResponse(
+				msg.Response.StatusCode,
+				msg.Response.Status,
+				headers,
+				map[string]string{},
+				msg.Response.Body,
+				timeStr,
+				sizeStr,
+			)
+			m.activePanel = ResponsePanel
+
+			if msg.Error == nil {
+				m.statusBar.Success(msg.Response.Status, fmt.Sprintf("%s in %s", sizeStr, timeStr))
+			}
+		}
+
+		if msg.Error != nil {
+			m.statusBar.Error(msg.Error)
+		}
+		return m, nil
+
 	case CommandExecuteMsg:
 		// Handle command execution
 		return m.handleCommand(msg)
@@ -2801,14 +2865,13 @@ func (m *Model) flushPendingRequestEdits() {
 
 // sendHTTPRequest builds and sends an HTTP request from the current request panel state
 func (m Model) sendHTTPRequest() (tea.Model, tea.Cmd) {
-	// gRPC invocation isn't wired up yet (v1 scope was just the protocol
-	// toggle + dynamic tabs) - without this check, ctrl+s falls through
-	// to the HTTP send path below, which tries to net/http.Do a
-	// "grpc://host:port" URL and fails with a confusing raw Go error
-	// ("unsupported protocol scheme") instead of a clean status message.
+	// gRPC requests take a completely different path (reflection + dynamic
+	// invoke instead of net/http) - ctrl+s used to fall through to the
+	// HTTP send path below regardless of protocol, which tried to
+	// net/http.Do a "grpc://host:port" URL and failed with a confusing
+	// raw Go error ("unsupported protocol scheme").
 	if m.requestPanel.GetProtocol().IsGRPC() {
-		m.statusBar.Info("gRPC invoke isn't implemented yet - toggle + tabs only for now")
-		return m, nil
+		return m.sendGRPCRequest()
 	}
 
 	// Check if a request is loaded
@@ -2863,6 +2926,57 @@ func (m Model) sendHTTPRequest() (tea.Model, tea.Cmd) {
 	// No pre-request script, send request directly
 	m.statusBar.Info("Sending request...")
 	return m, tea.Batch(SendHTTPRequestCmd(req, m.activeTLSConfig()), loaderTickCmd())
+}
+
+// sendGRPCRequest builds and invokes a unary gRPC call from the current
+// Server/Metadata/Message tab state. No pre/post-request script support
+// yet (those are HTTP-request-shaped today) - straight invoke only.
+func (m Model) sendGRPCRequest() (tea.Model, tea.Cmd) {
+	cfg := m.requestPanel.GetGRPCConfig()
+	if cfg == nil {
+		m.statusBar.Info("No gRPC config to send (Server tab)")
+		return m, nil
+	}
+	// Message lives in bodyEditor (shared with the Body tab), not the
+	// Server/Metadata tables GetGRPCConfig() reads from, so it needs
+	// filling in separately.
+	cfg.Message = m.requestPanel.GetBodyContent()
+
+	if cfg.Server == "" || cfg.Service == "" || cfg.Method == "" {
+		m.statusBar.Info("Server/Service/Method all need to be set (Server tab)")
+		return m, nil
+	}
+
+	if m.isSending {
+		m.statusBar.Info("Request already in progress...")
+		return m, nil
+	}
+
+	// Build a synthetic api.Request purely for console history logging -
+	// gRPC has no real HTTP request, but reusing the same Request/
+	// ConsoleEntry shape means the Console tab and request history work
+	// unmodified.
+	headers := make(map[string]string, len(cfg.Metadata))
+	for _, kv := range cfg.Metadata {
+		if kv.Enabled && kv.Key != "" {
+			headers[kv.Key] = kv.Value
+		}
+	}
+	m.lastRequest = &api.Request{
+		Method:  api.Invoke,
+		URL:     fmt.Sprintf("%s/%s/%s", api.StripGRPCScheme(cfg.Server), cfg.Service, cfg.Method),
+		Headers: headers,
+		Body:    cfg.Message,
+	}
+
+	m.isSending = true
+	m.requestStart = time.Now()
+	m.responsePanel.ClearResponse()
+	m.responsePanel.ClearTestResults()
+	m.responsePanel.SetLoading(true)
+	m.statusBar.Info(fmt.Sprintf("Invoking %s/%s...", cfg.Service, cfg.Method))
+
+	return m, tea.Batch(SendGRPCRequestCmd(cfg), loaderTickCmd())
 }
 
 // isDefaultScript checks if a script is the default placeholder script

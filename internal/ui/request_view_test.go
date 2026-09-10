@@ -159,3 +159,33 @@ func TestSyncGRPCTLSRowsAddsAndRemovesSubRows(t *testing.T) {
 		t.Errorf("Server = %q, want %q (base rows shouldn't be disturbed)", cfg.Server, "localhost:29010")
 	}
 }
+
+// TestGetBodyContentReturnsGRPCMessage verifies the Message tab (which
+// reuses bodyEditor) loads GRPCConfig.Message correctly and GetBodyContent
+// reads it back - this is exactly the path Model.sendGRPCRequest relies on
+// to fill in cfg.Message before invoking, since GetGRPCConfig() itself
+// deliberately doesn't track Message.
+func TestGetBodyContentReturnsGRPCMessage(t *testing.T) {
+	rv := NewRequestView()
+	rv.LoadCollectionRequest(&api.CollectionRequest{
+		ID:       "req1",
+		Protocol: api.ProtocolGRPC,
+		GRPC: &api.GRPCConfig{
+			Server:  "localhost:29010",
+			Service: "employee.v1.EmployeeService",
+			Method:  "CreateEmployee",
+			Message: `{"first_name": "Test"}`,
+		},
+	})
+
+	if got := rv.GetBodyContent(); got != `{"first_name": "Test"}` {
+		t.Errorf("GetBodyContent() = %q, want %q", got, `{"first_name": "Test"}`)
+	}
+
+	// GetGRPCConfig() intentionally doesn't carry Message - callers (like
+	// Model.sendGRPCRequest) are expected to fill it in separately from
+	// GetBodyContent(). Confirm that contract still holds.
+	if cfg := rv.GetGRPCConfig(); cfg.Message != "" {
+		t.Errorf("GetGRPCConfig().Message = %q, want empty (Message isn't tracked by Server/Metadata tables)", cfg.Message)
+	}
+}
