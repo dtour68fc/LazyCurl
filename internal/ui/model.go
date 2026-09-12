@@ -2831,20 +2831,31 @@ func (m Model) activeTLSConfig() EnvTLSConfig {
 	}
 }
 
-// flushPendingRequestEdits persists whatever's currently sitting in the Body
-// and Scripts editors to the collection file on disk. Normally this happens
-// automatically when you press Esc to leave an editor's INSERT mode - but
-// Ctrl+S sends the request from ANY context, including while still actively
-// typing, which would otherwise skip that autosave entirely: the request
-// itself would still use the live (unsaved) text since the getters read
-// straight from the editor widget, but the edit would never make it to disk,
-// so it'd look like it "didn't save" the moment you switched away and back.
+// flushPendingRequestEdits persists whatever's currently sitting in the URL,
+// Body, and Scripts editors to the collection file on disk. Normally this
+// happens automatically when you press Esc/Enter to leave an editor's
+// INSERT mode - but Ctrl+S sends the request from ANY context, including
+// while still actively typing (the URL bar included), which would otherwise
+// skip that autosave entirely: the request itself still uses the live
+// (unsaved) text since the getters read straight from the editor widget,
+// but the edit would never make it to disk, so it'd look like it "didn't
+// save" the moment you switched to another request and back.
 func (m *Model) flushPendingRequestEdits() {
 	requestID := m.requestPanel.GetCurrentRequestID()
 	if requestID == "" {
 		return
 	}
 	collections := m.leftPanel.GetCollections()
+	if m.requestPanel.IsEditingURL() {
+		// Mirrors handleURLInput's Esc/Enter path: leave edit mode, re-derive
+		// Params from the URL, then persist - so Ctrl+S while still typing
+		// the URL behaves the same as committing it normally.
+		m.requestPanel.SetEditingURL(false)
+		m.requestPanel.ParseURLParams()
+		if err := collections.UpdateRequestURLByID(requestID, m.requestPanel.GetURL()); err != nil {
+			m.statusBar.Error(err)
+		}
+	}
 	if err := collections.UpdateRequestScriptsByID(
 		requestID,
 		m.requestPanel.GetPreRequestScript(),

@@ -74,6 +74,23 @@ func InvokeGRPC(cfg *GRPCConfig) (*Response, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), grpcInvokeTimeout)
 	defer cancel()
 
+	// Attach outgoing metadata (e.g. Authorization) before any RPC is made -
+	// including the reflection lookup below. Servers that gate all streams
+	// (reflection included) behind auth interceptors will otherwise reject
+	// or even panic on the reflection call since it'd carry no credentials,
+	// even though the caller did supply them for the "real" invoke.
+	if len(cfg.Metadata) > 0 {
+		outMD := metadata.MD{}
+		for _, kv := range cfg.Metadata {
+			if kv.Enabled && kv.Key != "" {
+				outMD.Append(kv.Key, kv.Value)
+			}
+		}
+		if len(outMD) > 0 {
+			ctx = metadata.NewOutgoingContext(ctx, outMD)
+		}
+	}
+
 	conn, err := grpc.NewClient(server, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, fmt.Errorf("dial %q: %w", server, err)
@@ -106,18 +123,6 @@ func InvokeGRPC(cfg *GRPCConfig) (*Response, error) {
 	}
 	if err := reqMsg.UnmarshalJSON([]byte(message)); err != nil {
 		return nil, fmt.Errorf("request message doesn't match %s: %w", md.GetInputType().GetFullyQualifiedName(), err)
-	}
-
-	if len(cfg.Metadata) > 0 {
-		outMD := metadata.MD{}
-		for _, kv := range cfg.Metadata {
-			if kv.Enabled && kv.Key != "" {
-				outMD.Append(kv.Key, kv.Value)
-			}
-		}
-		if len(outMD) > 0 {
-			ctx = metadata.NewOutgoingContext(ctx, outMD)
-		}
 	}
 
 	stub := grpcdynamic.NewStub(conn)
