@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 // TestLoadCollectionRequestSwitchesTabsForProtocol verifies loading a gRPC

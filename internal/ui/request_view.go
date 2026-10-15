@@ -9,11 +9,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
-	"github.com/kbrdn1/LazyCurl/internal/config"
-	"github.com/kbrdn1/LazyCurl/internal/session"
-	"github.com/kbrdn1/LazyCurl/internal/ui/components"
-	"github.com/kbrdn1/LazyCurl/pkg/styles"
+	"github.com/dtour68fc/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/config"
+	"github.com/dtour68fc/LazyCurl/internal/session"
+	"github.com/dtour68fc/LazyCurl/internal/ui/components"
+	"github.com/dtour68fc/LazyCurl/pkg/styles"
 )
 
 // BodyType represents the type of request body

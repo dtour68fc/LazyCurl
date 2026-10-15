@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 const postmanSchemaV21 = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"

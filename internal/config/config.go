@@ -259,6 +259,14 @@ func GetGlobalEnvironmentsPath() string {
 	return filepath.Join(GetGlobalConfigDir(), "environments")
 }
 
+// GetGlobalSessionsPath returns the directory where per-workspace session
+// files are stored. Sessions are keyed by workspace (see session.GetSessionPath)
+// but all live under the global config dir so launching lazycurl never
+// creates a `.lazycurl/` folder in the current directory.
+func GetGlobalSessionsPath() string {
+	return filepath.Join(GetGlobalConfigDir(), "sessions")
+}
+
 // GetWorkspacePath returns the workspace path (current directory)
 func GetWorkspacePath() (string, error) {
 	return os.Getwd()

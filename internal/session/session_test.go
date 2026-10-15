@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/dtour68fc/LazyCurl/internal/config"
 )
 
 func TestDefaultSession(t *testing.T) {
@@ -55,37 +57,43 @@ func TestDefaultSession(t *testing.T) {
 }
 
 func TestGetSessionPath(t *testing.T) {
-	tests := []struct {
-		name          string
-		workspacePath string
-		want          string
-	}{
-		{
-			name:          "simple path",
-			workspacePath: "/home/user/project",
-			want:          "/home/user/project/.lazycurl/session.yml",
-		},
-		{
-			name:          "path with trailing slash",
-			workspacePath: "/home/user/project/",
-			want:          "/home/user/project/.lazycurl/session.yml",
-		},
-		{
-			name:          "current directory",
-			workspacePath: ".",
-			want:          ".lazycurl/session.yml",
-		},
-	}
+	// Session files now live under the global config dir rather than inside
+	// the workspace, so no `.lazycurl/` folder is created in the cwd.
+	globalDir := config.GetGlobalSessionsPath()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := GetSessionPath(tt.workspacePath)
-			// Use filepath.Clean for comparison to handle trailing slashes
-			if filepath.Clean(got) != filepath.Clean(tt.want) {
-				t.Errorf("GetSessionPath(%q) = %q, want %q", tt.workspacePath, got, tt.want)
-			}
-		})
-	}
+	t.Run("path lives under global sessions dir", func(t *testing.T) {
+		got := GetSessionPath("/home/user/project")
+		if filepath.Dir(got) != filepath.Clean(globalDir) {
+			t.Errorf("GetSessionPath() = %q, want parent dir %q", got, globalDir)
+		}
+		if filepath.Ext(got) != ".yml" {
+			t.Errorf("GetSessionPath() = %q, want .yml extension", got)
+		}
+	})
+
+	t.Run("same workspace yields same path", func(t *testing.T) {
+		a := GetSessionPath("/home/user/project")
+		b := GetSessionPath("/home/user/project")
+		if a != b {
+			t.Errorf("GetSessionPath() not stable: %q != %q", a, b)
+		}
+	})
+
+	t.Run("trailing slash does not change path", func(t *testing.T) {
+		a := GetSessionPath("/home/user/project")
+		b := GetSessionPath("/home/user/project/")
+		if a != b {
+			t.Errorf("GetSessionPath() differs with trailing slash: %q != %q", a, b)
+		}
+	})
+
+	t.Run("different workspaces yield different paths", func(t *testing.T) {
+		a := GetSessionPath("/home/user/project-a")
+		b := GetSessionPath("/home/user/project-b")
+		if a == b {
+			t.Errorf("GetSessionPath() collided for different workspaces: %q", a)
+		}
+	})
 }
 
 func TestLoadSession(t *testing.T) {
@@ -107,8 +115,8 @@ func TestLoadSession(t *testing.T) {
 		{
 			name: "valid session file",
 			setup: func(dir string) error {
-				sessionDir := filepath.Join(dir, SessionDir)
-				if err := os.MkdirAll(sessionDir, 0755); err != nil {
+				sessionPath := GetSessionPath(dir)
+				if err := os.MkdirAll(filepath.Dir(sessionPath), 0755); err != nil {
 					return err
 				}
 				content := `version: 1
@@ -125,7 +133,7 @@ panels:
     active_tab: headers
     scroll_position: 10
 `
-				return os.WriteFile(filepath.Join(sessionDir, SessionFileName), []byte(content), 0644)
+				return os.WriteFile(sessionPath, []byte(content), 0644)
 			},
 			wantDefault: false,
 			wantErr:     false,
@@ -133,12 +141,12 @@ panels:
 		{
 			name: "invalid YAML returns default",
 			setup: func(dir string) error {
-				sessionDir := filepath.Join(dir, SessionDir)
-				if err := os.MkdirAll(sessionDir, 0755); err != nil {
+				sessionPath := GetSessionPath(dir)
+				if err := os.MkdirAll(filepath.Dir(sessionPath), 0755); err != nil {
 					return err
 				}
 				content := `invalid: yaml: content: [[[`
-				return os.WriteFile(filepath.Join(sessionDir, SessionFileName), []byte(content), 0644)
+				return os.WriteFile(sessionPath, []byte(content), 0644)
 			},
 			wantDefault: true,
 			wantErr:     false,
@@ -146,14 +154,14 @@ panels:
 		{
 			name: "unsupported version returns default",
 			setup: func(dir string) error {
-				sessionDir := filepath.Join(dir, SessionDir)
-				if err := os.MkdirAll(sessionDir, 0755); err != nil {
+				sessionPath := GetSessionPath(dir)
+				if err := os.MkdirAll(filepath.Dir(sessionPath), 0755); err != nil {
 					return err
 				}
 				content := `version: 999
 active_panel: collections
 `
-				return os.WriteFile(filepath.Join(sessionDir, SessionFileName), []byte(content), 0644)
+				return os.WriteFile(sessionPath, []byte(content), 0644)
 			},
 			wantDefault: true,
 			wantErr:     false,
@@ -161,14 +169,14 @@ active_panel: collections
 		{
 			name: "version 0 returns default",
 			setup: func(dir string) error {
-				sessionDir := filepath.Join(dir, SessionDir)
-				if err := os.MkdirAll(sessionDir, 0755); err != nil {
+				sessionPath := GetSessionPath(dir)
+				if err := os.MkdirAll(filepath.Dir(sessionPath), 0755); err != nil {
 					return err
 				}
 				content := `version: 0
 active_panel: collections
 `
-				return os.WriteFile(filepath.Join(sessionDir, SessionFileName), []byte(content), 0644)
+				return os.WriteFile(sessionPath, []byte(content), 0644)
 			},
 			wantDefault: true,
 			wantErr:     false,
@@ -481,7 +489,7 @@ func TestValidateCollectionReference(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	// Create collections directory with a file
-	collectionsDir := filepath.Join(dir, SessionDir, "collections")
+	collectionsDir := filepath.Join(dir, ".lazycurl", "collections")
 	if err := os.MkdirAll(collectionsDir, 0755); err != nil {
 		t.Fatalf("Failed to create collections dir: %v", err)
 	}

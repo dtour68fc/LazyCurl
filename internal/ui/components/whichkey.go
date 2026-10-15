@@ -6,7 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/kbrdn1/LazyCurl/pkg/styles"
+	"github.com/dtour68fc/LazyCurl/pkg/styles"
 )
 
 // KeyBinding represents a single keybinding with its description

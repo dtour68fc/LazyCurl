@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
-	"github.com/kbrdn1/LazyCurl/internal/ui/components"
+	"github.com/dtour68fc/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/ui/components"
 )
 
 var errNoActiveEnvironment = errors.New("no active environment - activate one in the Envs tab first")

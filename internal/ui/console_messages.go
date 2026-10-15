@@ -3,7 +3,7 @@ package ui
 import (
 	"time"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 // ResendRequestMsg signals that a request should be resent

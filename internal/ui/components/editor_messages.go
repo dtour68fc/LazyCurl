@@ -3,7 +3,7 @@ package components
 import (
 	"time"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 // EditorErrorType categorizes editor errors

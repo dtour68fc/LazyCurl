@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
-	"github.com/kbrdn1/LazyCurl/internal/config"
-	"github.com/kbrdn1/LazyCurl/internal/import/postman"
+	"github.com/dtour68fc/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/config"
+	"github.com/dtour68fc/LazyCurl/internal/import/postman"
 )
 
 // ImportCommand handles the import subcommand

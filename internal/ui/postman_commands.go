@@ -7,9 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
-	"github.com/kbrdn1/LazyCurl/internal/config"
-	"github.com/kbrdn1/LazyCurl/internal/import/postman"
+	"github.com/dtour68fc/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/config"
+	"github.com/dtour68fc/LazyCurl/internal/import/postman"
 )
 
 // ImportPostmanFile imports a Postman collection or environment file.

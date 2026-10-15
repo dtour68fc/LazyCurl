@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/kbrdn1/LazyCurl/pkg/styles"
+	"github.com/dtour68fc/LazyCurl/pkg/styles"
 )
 
 // Message duration constant - 2 seconds for all action messages

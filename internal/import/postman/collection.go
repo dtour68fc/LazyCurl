@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 // ImportCollection imports a Postman Collection v2.1 file and converts it to LazyCurl format.

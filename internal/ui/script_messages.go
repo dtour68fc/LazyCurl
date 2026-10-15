@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 // ScriptType indicates when a script runs

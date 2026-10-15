@@ -7,9 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
-	"github.com/kbrdn1/LazyCurl/internal/config"
-	"github.com/kbrdn1/LazyCurl/internal/ui/components"
+	"github.com/dtour68fc/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/config"
+	"github.com/dtour68fc/LazyCurl/internal/ui/components"
 )
 
 // CollectionsView represents the collections panel

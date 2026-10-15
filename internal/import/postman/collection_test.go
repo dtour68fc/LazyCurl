@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 func TestImportCollection_Simple(t *testing.T) {

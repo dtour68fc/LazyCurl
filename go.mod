@@ -1,4 +1,4 @@
-module github.com/kbrdn1/LazyCurl
+module github.com/dtour68fc/LazyCurl
 
 go 1.25.0
 

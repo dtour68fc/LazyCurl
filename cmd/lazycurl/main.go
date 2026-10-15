@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/kbrdn1/LazyCurl/internal/config"
-	"github.com/kbrdn1/LazyCurl/internal/ui"
+	"github.com/dtour68fc/LazyCurl/internal/config"
+	"github.com/dtour68fc/LazyCurl/internal/ui"
 )
 
 // Version information set by goreleaser ldflags
@@ -113,6 +113,6 @@ Keyboard Shortcuts (TUI):
   Ctrl+S    Send request
   q         Quit
 
-For more information, visit: https://github.com/kbrdn1/LazyCurl
+For more information, visit: https://github.com/dtour68fc/LazyCurl
 `)
 }

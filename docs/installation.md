@@ -43,7 +43,7 @@ Complete guide to install LazyCurl on your system.
 ### One-liner (Go required)
 
 ```bash
-go install github.com/kbrdn1/LazyCurl/cmd/lazycurl@latest
+go install github.com/dtour68fc/LazyCurl/cmd/lazycurl@latest
 ```
 
 ### One-liner (from source)
@@ -116,7 +116,7 @@ This installs to `$GOPATH/bin` (usually `~/go/bin`).
 If you have Go installed, this is the simplest method:
 
 ```bash
-go install github.com/kbrdn1/LazyCurl/cmd/lazycurl@latest
+go install github.com/dtour68fc/LazyCurl/cmd/lazycurl@latest
 ```
 
 The binary will be installed to `$GOPATH/bin/lazycurl`.

@@ -1,22 +1,23 @@
 // Package session provides session persistence for LazyCurl.
-// It manages saving and restoring application state to .lazycurl/session.yml.
+// It manages saving and restoring application state to a per-workspace file
+// under the global config dir (~/.config/lazycurl/sessions/<hash>.yml), so
+// launching lazycurl never creates a `.lazycurl/` folder in the workspace.
 package session
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/dtour68fc/LazyCurl/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	// SessionVersion is the current session file format version
 	SessionVersion = 1
-	// SessionFileName is the name of the session file
-	SessionFileName = "session.yml"
-	// SessionDir is the directory containing session files
-	SessionDir = ".lazycurl"
 )
 
 // Session represents the complete application state at a point in time.
@@ -28,7 +29,7 @@ type Session struct {
 	ActiveRequest              string            `yaml:"active_request,omitempty"`
 	ActiveEnvironment          string            `yaml:"active_environment,omitempty"`
 	ActiveEnvironmentByProject map[string]string `yaml:"active_environment_by_project,omitempty"`
-	Panels                     PanelsState        `yaml:"panels"`
+	Panels                     PanelsState       `yaml:"panels"`
 }
 
 // PanelsState contains state for all panels.
@@ -86,13 +87,28 @@ func DefaultSession() *Session {
 	}
 }
 
-// GetSessionPath returns the full path to the session file.
+// GetSessionPath returns the full path to the session file for a given
+// workspace. Session files live under the global config dir, keyed by a
+// hash of the workspace's absolute path, so each project still gets its own
+// persisted state without a `.lazycurl/` folder being created in the cwd.
 func GetSessionPath(workspacePath string) string {
-	return filepath.Join(workspacePath, SessionDir, SessionFileName)
+	return filepath.Join(config.GetGlobalSessionsPath(), workspaceSessionFileName(workspacePath))
 }
 
-// LoadSession loads session from .lazycurl/session.yml in the given workspace.
-// Returns DefaultSession if file is missing, invalid, or has unsupported version.
+// workspaceSessionFileName derives a stable, filesystem-safe file name for a
+// workspace's session file from the absolute workspace path.
+func workspaceSessionFileName(workspacePath string) string {
+	abs, err := filepath.Abs(workspacePath)
+	if err != nil {
+		abs = workspacePath
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(sum[:])[:16] + ".yml"
+}
+
+// LoadSession loads the session for the given workspace from the global
+// sessions dir. Returns DefaultSession if file is missing, invalid, or has
+// unsupported version.
 func LoadSession(workspacePath string) (*Session, error) {
 	sessionPath := GetSessionPath(workspacePath)
 
@@ -121,11 +137,11 @@ func LoadSession(workspacePath string) (*Session, error) {
 	return &session, nil
 }
 
-// Save saves session to .lazycurl/session.yml in the given workspace.
+// Save saves the session for the given workspace to the global sessions dir.
 // Uses atomic write (temp file + rename) for safety.
 func (s *Session) Save(workspacePath string) error {
-	sessionDir := filepath.Join(workspacePath, SessionDir)
 	sessionPath := GetSessionPath(workspacePath)
+	sessionDir := filepath.Dir(sessionPath)
 
 	// Create directory if needed
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
@@ -160,10 +176,15 @@ func (s *Session) Save(workspacePath string) error {
 // Validate validates session references and clears invalid ones.
 // Returns the same session with invalid references cleared.
 func (s *Session) Validate(workspacePath string) *Session {
-	// Validate ActiveCollection
+	// Validate ActiveCollection against the global collections dir (new
+	// default) and the legacy per-workspace `.lazycurl/collections` dir
+	// (still supported for backward compat).
 	if s.ActiveCollection != "" {
-		collectionPath := filepath.Join(workspacePath, SessionDir, "collections", s.ActiveCollection)
-		if _, err := os.Stat(collectionPath); os.IsNotExist(err) {
+		globalPath := filepath.Join(config.GetGlobalCollectionsPath(), s.ActiveCollection)
+		legacyPath := filepath.Join(workspacePath, ".lazycurl", "collections", s.ActiveCollection)
+		_, globalErr := os.Stat(globalPath)
+		_, legacyErr := os.Stat(legacyPath)
+		if os.IsNotExist(globalErr) && os.IsNotExist(legacyErr) {
 			s.ActiveCollection = ""
 			s.ActiveRequest = "" // Clear request if collection is invalid
 		}

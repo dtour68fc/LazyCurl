@@ -65,7 +65,7 @@ make build
 ### Using Go Install
 
 ```bash
-go install github.com/kbrdn1/LazyCurl/cmd/lazycurl@latest
+go install github.com/dtour68fc/LazyCurl/cmd/lazycurl@latest
 ```
 
 ---

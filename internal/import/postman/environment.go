@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 // ImportEnvironment imports a Postman Environment file and converts it to LazyCurl format.

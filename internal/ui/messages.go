@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 // CurlImportedMsg is sent when a cURL command is successfully imported

@@ -3,7 +3,7 @@ package ui
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/kbrdn1/LazyCurl/pkg/styles"
+	"github.com/dtour68fc/LazyCurl/pkg/styles"
 )
 
 // Mode represents the current interaction context for the TUI

@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/kbrdn1/LazyCurl/pkg/styles"
+	"github.com/dtour68fc/LazyCurl/pkg/styles"
 )
 
 // =============================================================================

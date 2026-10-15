@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kbrdn1/LazyCurl/internal/api"
+	"github.com/dtour68fc/LazyCurl/internal/api"
 )
 
 func TestNewScriptConsoleFormatter(t *testing.T) {
