@@ -1675,6 +1675,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Error == nil {
 				m.statusBar.Success(msg.Response.Status, fmt.Sprintf("%s in %s", sizeStr, timeStr))
 			}
+		} else if msg.Error != nil {
+			// Failures before an actual invoke attempt (dial, TLS handshake,
+			// reflection lookup) have no *Response to show - InvokeGRPC just
+			// returns the error directly. Put the full text in the Response
+			// panel body too, not just the status bar: the status bar is a
+			// single truncated line, which was silently chopping off the
+			// part of reflection errors (wrapped gRPC status code/details)
+			// that actually explains what went wrong.
+			m.responsePanel.SetResponse(
+				0,
+				"Error",
+				map[string]string{},
+				map[string]string{},
+				msg.Error.Error(),
+				formatDuration(duration),
+				"",
+			)
+			m.activePanel = ResponsePanel
 		}
 
 		if msg.Error != nil {
