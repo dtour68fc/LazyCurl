@@ -1181,6 +1181,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := m.leftPanel.GetCollections().UpdateRequestURLByID(requestID, msg.URL); err != nil {
 				m.statusBar.Error(err)
 			} else {
+				// For gRPC requests the URL bar is really just showing the
+				// Server tab's "Server" row under a different label - mirror
+				// the edit back into that row (and persist it) so the two
+				// don't drift apart from each other.
+				if m.requestPanel.GetProtocol().IsGRPC() && len(m.requestPanel.grpcServerTable.Rows) > 0 {
+					m.requestPanel.grpcServerTable.Rows[0].Value = msg.URL
+					m.saveGRPCServerConfig()
+				}
 				m.statusBar.Success("URL saved", "")
 				m.leftPanel.GetCollections().ReloadCollections()
 			}
@@ -2630,6 +2638,16 @@ func (m *Model) saveGRPCServerConfig() {
 	}
 	if err := m.leftPanel.GetCollections().UpdateRequestGRPCServerByID(requestID, cfg); err != nil {
 		m.statusBar.Error(err)
+		return
+	}
+	// Mirror the Server row back into the URL bar (and persist it there
+	// too) so it doesn't show a stale address if the two have drifted -
+	// see the matching mirror in the RequestURLChangedMsg handler.
+	if cfg.Server != m.requestPanel.GetURL() {
+		m.requestPanel.SetURL(cfg.Server)
+		if err := m.leftPanel.GetCollections().UpdateRequestURLByID(requestID, cfg.Server); err != nil {
+			m.statusBar.Error(err)
+		}
 	}
 }
 

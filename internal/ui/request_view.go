@@ -2373,8 +2373,15 @@ func (r *RequestView) LoadCollectionRequest(req *api.CollectionRequest) {
 		r.method = api.Invoke
 	}
 
-	// Set URL
+	// Set URL. For gRPC requests, the URL bar and the Server tab's "Server"
+	// row used to be loaded from two independent fields (req.URL vs
+	// req.GRPC.Server) that nothing ever kept in sync, so editing one could
+	// silently drift from the other. GRPC.Server is the field that's
+	// actually used to dial/invoke, so it wins here whenever both exist.
 	r.url = req.URL
+	if req.Protocol.IsGRPC() && req.GRPC != nil && req.GRPC.Server != "" {
+		r.url = req.GRPC.Server
+	}
 
 	// Load gRPC-specific fields (server/service/method/TLS + metadata).
 	// Table rows are always reset to the fixed 4-row shape even if the
