@@ -454,6 +454,90 @@ func (x *ChangeNotification) GetUpdatedBy() string {
 	return ""
 }
 
+type ListProjectsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListProjectsRequest) Reset() {
+	*x = ListProjectsRequest{}
+	mi := &file_nexuscurl_v1_nexuscurl_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProjectsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProjectsRequest) ProtoMessage() {}
+
+func (x *ListProjectsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_nexuscurl_v1_nexuscurl_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProjectsRequest.ProtoReflect.Descriptor instead.
+func (*ListProjectsRequest) Descriptor() ([]byte, []int) {
+	return file_nexuscurl_v1_nexuscurl_proto_rawDescGZIP(), []int{7}
+}
+
+type ListProjectsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every project name that currently has at least one pushed Resource
+	// on this server. A brand-new project with nothing pushed yet won't
+	// show up here - there's nothing to list - so clients should still
+	// allow typing a new project name freeform alongside this list.
+	Projects      []string `protobuf:"bytes,1,rep,name=projects,proto3" json:"projects,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListProjectsResponse) Reset() {
+	*x = ListProjectsResponse{}
+	mi := &file_nexuscurl_v1_nexuscurl_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProjectsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProjectsResponse) ProtoMessage() {}
+
+func (x *ListProjectsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_nexuscurl_v1_nexuscurl_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProjectsResponse.ProtoReflect.Descriptor instead.
+func (*ListProjectsResponse) Descriptor() ([]byte, []int) {
+	return file_nexuscurl_v1_nexuscurl_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ListProjectsResponse) GetProjects() []string {
+	if x != nil {
+		return x.Projects
+	}
+	return nil
+}
+
 var File_nexuscurl_v1_nexuscurl_proto protoreflect.FileDescriptor
 
 const file_nexuscurl_v1_nexuscurl_proto_rawDesc = "" +
@@ -485,11 +569,15 @@ const file_nexuscurl_v1_nexuscurl_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
 	"\brevision\x18\x03 \x01(\x03R\brevision\x12\x1d\n" +
 	"\n" +
-	"updated_by\x18\x04 \x01(\tR\tupdatedBy2\xe1\x01\n" +
-	"\x10NexusCurlService\x12=\n" +
+	"updated_by\x18\x04 \x01(\tR\tupdatedBy\"\x15\n" +
+	"\x13ListProjectsRequest\"2\n" +
+	"\x14ListProjectsResponse\x12\x1a\n" +
+	"\bprojects\x18\x01 \x03(\tR\bprojects2\xb8\x02\n" +
+	"\x10NexusCurlService\x12U\n" +
+	"\fListProjects\x12!.nexuscurl.v1.ListProjectsRequest\x1a\".nexuscurl.v1.ListProjectsResponse\x12=\n" +
 	"\x04Pull\x12\x19.nexuscurl.v1.PullRequest\x1a\x1a.nexuscurl.v1.PullResponse\x12=\n" +
 	"\x04Push\x12\x19.nexuscurl.v1.PushRequest\x1a\x1a.nexuscurl.v1.PushResponse\x12O\n" +
-	"\tSubscribe\x12\x1e.nexuscurl.v1.SubscribeRequest\x1a .nexuscurl.v1.ChangeNotification0\x01B@Z>github.com/dtour68fc/LazyCurl/internal/nexus/pb/v1;nexuscurlv1b\x06proto3"
+	"\tSubscribe\x12\x1e.nexuscurl.v1.SubscribeRequest\x1a .nexuscurl.v1.ChangeNotification0\x01BCZAgithub.com/dtour68fc/NexusCurlServer/gen/nexuscurl/v1;nexuscurlv1b\x06proto3"
 
 var (
 	file_nexuscurl_v1_nexuscurl_proto_rawDescOnce sync.Once
@@ -503,28 +591,32 @@ func file_nexuscurl_v1_nexuscurl_proto_rawDescGZIP() []byte {
 	return file_nexuscurl_v1_nexuscurl_proto_rawDescData
 }
 
-var file_nexuscurl_v1_nexuscurl_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_nexuscurl_v1_nexuscurl_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_nexuscurl_v1_nexuscurl_proto_goTypes = []any{
-	(*Resource)(nil),           // 0: nexuscurl.v1.Resource
-	(*PullRequest)(nil),        // 1: nexuscurl.v1.PullRequest
-	(*PullResponse)(nil),       // 2: nexuscurl.v1.PullResponse
-	(*PushRequest)(nil),        // 3: nexuscurl.v1.PushRequest
-	(*PushResponse)(nil),       // 4: nexuscurl.v1.PushResponse
-	(*SubscribeRequest)(nil),   // 5: nexuscurl.v1.SubscribeRequest
-	(*ChangeNotification)(nil), // 6: nexuscurl.v1.ChangeNotification
+	(*Resource)(nil),             // 0: nexuscurl.v1.Resource
+	(*PullRequest)(nil),          // 1: nexuscurl.v1.PullRequest
+	(*PullResponse)(nil),         // 2: nexuscurl.v1.PullResponse
+	(*PushRequest)(nil),          // 3: nexuscurl.v1.PushRequest
+	(*PushResponse)(nil),         // 4: nexuscurl.v1.PushResponse
+	(*SubscribeRequest)(nil),     // 5: nexuscurl.v1.SubscribeRequest
+	(*ChangeNotification)(nil),   // 6: nexuscurl.v1.ChangeNotification
+	(*ListProjectsRequest)(nil),  // 7: nexuscurl.v1.ListProjectsRequest
+	(*ListProjectsResponse)(nil), // 8: nexuscurl.v1.ListProjectsResponse
 }
 var file_nexuscurl_v1_nexuscurl_proto_depIdxs = []int32{
 	0, // 0: nexuscurl.v1.PullResponse.resources:type_name -> nexuscurl.v1.Resource
 	0, // 1: nexuscurl.v1.PushRequest.resource:type_name -> nexuscurl.v1.Resource
 	0, // 2: nexuscurl.v1.PushResponse.resource:type_name -> nexuscurl.v1.Resource
-	1, // 3: nexuscurl.v1.NexusCurlService.Pull:input_type -> nexuscurl.v1.PullRequest
-	3, // 4: nexuscurl.v1.NexusCurlService.Push:input_type -> nexuscurl.v1.PushRequest
-	5, // 5: nexuscurl.v1.NexusCurlService.Subscribe:input_type -> nexuscurl.v1.SubscribeRequest
-	2, // 6: nexuscurl.v1.NexusCurlService.Pull:output_type -> nexuscurl.v1.PullResponse
-	4, // 7: nexuscurl.v1.NexusCurlService.Push:output_type -> nexuscurl.v1.PushResponse
-	6, // 8: nexuscurl.v1.NexusCurlService.Subscribe:output_type -> nexuscurl.v1.ChangeNotification
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
+	7, // 3: nexuscurl.v1.NexusCurlService.ListProjects:input_type -> nexuscurl.v1.ListProjectsRequest
+	1, // 4: nexuscurl.v1.NexusCurlService.Pull:input_type -> nexuscurl.v1.PullRequest
+	3, // 5: nexuscurl.v1.NexusCurlService.Push:input_type -> nexuscurl.v1.PushRequest
+	5, // 6: nexuscurl.v1.NexusCurlService.Subscribe:input_type -> nexuscurl.v1.SubscribeRequest
+	8, // 7: nexuscurl.v1.NexusCurlService.ListProjects:output_type -> nexuscurl.v1.ListProjectsResponse
+	2, // 8: nexuscurl.v1.NexusCurlService.Pull:output_type -> nexuscurl.v1.PullResponse
+	4, // 9: nexuscurl.v1.NexusCurlService.Push:output_type -> nexuscurl.v1.PushResponse
+	6, // 10: nexuscurl.v1.NexusCurlService.Subscribe:output_type -> nexuscurl.v1.ChangeNotification
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
 	3, // [3:3] is the sub-list for extension extendee
 	0, // [0:3] is the sub-list for field type_name
@@ -541,7 +633,7 @@ func file_nexuscurl_v1_nexuscurl_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_nexuscurl_v1_nexuscurl_proto_rawDesc), len(file_nexuscurl_v1_nexuscurl_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

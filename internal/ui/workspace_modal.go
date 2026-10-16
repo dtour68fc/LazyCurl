@@ -24,9 +24,26 @@ type WorkspaceModal struct {
 	importMode bool // true when picking a push target (see ShowForImport) rather than switching
 
 	// addForm is a real components.Modal reused only for its working
-	// text-field flow, to collect name/server/project for a new
-	// collaborative workspace.
+	// text-field flow, to collect name/server for a new collaborative
+	// workspace. Project isn't collected here - once name/server are
+	// confirmed, the caller connects to that server and we move on to
+	// the project-pick stage below instead.
 	addForm *components.Modal
+
+	// Project-pick stage: shown after addForm confirms, once the caller
+	// has connected to the new server and fetched its existing project
+	// names. pendingName/pendingServer carry the just-confirmed values
+	// through to the final Add call.
+	projectPickVisible bool
+	projectChoices     []string
+	projectCursor      int
+	pendingName        string
+	pendingServer      string
+
+	// newProjectForm collects a freeform project name, either because
+	// the server has no existing projects yet or the user picked
+	// "+ New project..." from the list.
+	newProjectForm *components.Modal
 }
 
 // NewWorkspaceModal creates a hidden workspace-switcher modal.
@@ -35,6 +52,8 @@ func NewWorkspaceModal() *WorkspaceModal {
 		addForm: components.NewFormModal("Add Workspace", "nexus_add_workspace", []components.FormField{
 			{Name: "name", Label: "Name", Type: "text", Placeholder: "e.g. staging"},
 			{Name: "server", Label: "Server (host:port)", Type: "text", Placeholder: "e.g. nexus.example.com:7777"},
+		}),
+		newProjectForm: components.NewFormModal("New Project", "nexus_new_project", []components.FormField{
 			{Name: "project", Label: "Project", Type: "text", Placeholder: "e.g. PMC"},
 		}),
 	}
@@ -68,15 +87,17 @@ func (w *WorkspaceModal) ShowForImport(items []nexus.Workspace) {
 	w.cursor = 0
 }
 
-// Hide closes the list (and any open add-form sub-modal).
+// Hide closes the list (and any open add-form/project-pick sub-modal).
 func (w *WorkspaceModal) Hide() {
 	w.visible = false
+	w.projectPickVisible = false
 	w.addForm.Hide()
+	w.newProjectForm.Hide()
 }
 
-// IsVisible reports whether either the list or its add-form sub-modal is showing.
+// IsVisible reports whether the list or either add-flow sub-modal is showing.
 func (w *WorkspaceModal) IsVisible() bool {
-	return w.visible || w.addForm.IsVisible()
+	return w.visible || w.addForm.IsVisible() || w.projectPickVisible || w.newProjectForm.IsVisible()
 }
 
 // WorkspaceModalAction is what the caller should do after Update
@@ -92,7 +113,9 @@ const (
 	WorkspaceModalAdd
 	WorkspaceModalRemove
 	WorkspaceModalCancel
-	WorkspaceModalImportTarget // user picked a workspace to import/push the pending resource into
+	WorkspaceModalImportTarget  // user picked a workspace to import/push the pending resource into
+	WorkspaceModalNeedProjects  // name+server confirmed - caller should connect, fetch projects, then call ShowProjectPick
+	WorkspaceModalProjectPicked // user picked (or typed) a final project name - caller should now Registry.Add
 )
 
 // Update handles a keypress against the list view. selected is only
@@ -129,7 +152,6 @@ func (w *WorkspaceModal) Update(msg tea.KeyMsg) (action WorkspaceModalAction, se
 		w.visible = false // keep registry state; hand off to the add sub-form
 		w.addForm.SetFieldValue("name", "")
 		w.addForm.SetFieldValue("server", "")
-		w.addForm.SetFieldValue("project", "")
 		w.addForm.Show()
 	case "d":
 		if w.importMode {
@@ -150,10 +172,11 @@ func (w *WorkspaceModal) Update(msg tea.KeyMsg) (action WorkspaceModalAction, se
 	return WorkspaceModalNone, nexus.Workspace{}
 }
 
-// UpdateAddForm forwards a key to the "add workspace" sub-form. When it
-// closes (confirmed or canceled), returns WorkspaceModalAdd + the new
-// Workspace on confirm, or WorkspaceModalCancel otherwise - the caller
-// (model.go) is responsible for validating/persisting via Registry.Add.
+// UpdateAddForm forwards a key to the "add workspace" sub-form (name +
+// server only). When it closes, returns WorkspaceModalNeedProjects with
+// those two fields set on confirm (the caller should connect to that
+// server, fetch its project list, and call ShowProjectPick), or
+// WorkspaceModalCancel otherwise.
 func (w *WorkspaceModal) UpdateAddForm(msg tea.KeyMsg) (action WorkspaceModalAction, added nexus.Workspace, cmd tea.Cmd) {
 	var c tea.Cmd
 	w.addForm, c = w.addForm.Update(msg)
@@ -169,8 +192,90 @@ func (w *WorkspaceModal) UpdateAddForm(msg tea.KeyMsg) (action WorkspaceModalAct
 	}
 	name, _ := closeMsg.Result.Values["name"].(string)
 	server, _ := closeMsg.Result.Values["server"].(string)
+	w.pendingName, w.pendingServer = name, server
+	return WorkspaceModalNeedProjects, nexus.Workspace{Name: name, Server: server}, nil
+}
+
+// ShowProjectPick displays the project-pick list (existing projects on
+// the just-confirmed server, plus an always-present "+ New project..."
+// entry) after UpdateAddForm has returned WorkspaceModalNeedProjects and
+// the caller has fetched the project names.
+func (w *WorkspaceModal) ShowProjectPick(projects []string) {
+	w.addForm.Hide()
+	w.projectPickVisible = true
+	w.projectChoices = projects
+	w.projectCursor = 0
+}
+
+// IsProjectPickVisible reports whether the project-pick list (as opposed
+// to its "+ New project..." text sub-form) is the part currently showing.
+func (w *WorkspaceModal) IsProjectPickVisible() bool {
+	return w.projectPickVisible
+}
+
+// IsNewProjectFormVisible reports whether the freeform "new project name"
+// text sub-form is currently showing.
+func (w *WorkspaceModal) IsNewProjectFormVisible() bool {
+	return w.newProjectForm.IsVisible()
+}
+
+// UpdateProjectPick handles navigation on the project-pick list. Enter on
+// a real project returns WorkspaceModalProjectPicked with pendingName/
+// pendingServer/that project filled in on the returned Workspace. Enter
+// on the trailing "+ New project..." entry instead hands off to the
+// newProjectForm text sub-form. Esc cancels the whole add flow.
+func (w *WorkspaceModal) UpdateProjectPick(msg tea.KeyMsg) (action WorkspaceModalAction, chosen nexus.Workspace) {
+	if !w.projectPickVisible {
+		return WorkspaceModalNone, nexus.Workspace{}
+	}
+	total := len(w.projectChoices) + 1 // +1 for the trailing "+ New project..." entry
+	switch msg.String() {
+	case "j", "down":
+		if w.projectCursor < total-1 {
+			w.projectCursor++
+		}
+	case "k", "up":
+		if w.projectCursor > 0 {
+			w.projectCursor--
+		}
+	case "enter":
+		if w.projectCursor == len(w.projectChoices) {
+			w.projectPickVisible = false
+			w.newProjectForm.SetFieldValue("project", "")
+			w.newProjectForm.Show()
+			return WorkspaceModalNone, nexus.Workspace{}
+		}
+		project := w.projectChoices[w.projectCursor]
+		w.Hide()
+		return WorkspaceModalProjectPicked, nexus.Workspace{Name: w.pendingName, Server: w.pendingServer, Project: project}
+	case "esc", "q":
+		w.Hide()
+		return WorkspaceModalCancel, nexus.Workspace{}
+	}
+	return WorkspaceModalNone, nexus.Workspace{}
+}
+
+// UpdateNewProjectForm forwards a key to the "new project name" text
+// sub-form. On confirm, returns WorkspaceModalProjectPicked with the
+// typed name; on cancel, returns to the project-pick list rather than
+// canceling the whole add flow (the user may have just backed out of
+// typing a name, not out of adding the workspace).
+func (w *WorkspaceModal) UpdateNewProjectForm(msg tea.KeyMsg) (action WorkspaceModalAction, chosen nexus.Workspace, cmd tea.Cmd) {
+	var c tea.Cmd
+	w.newProjectForm, c = w.newProjectForm.Update(msg)
+	if c == nil {
+		return WorkspaceModalNone, nexus.Workspace{}, nil
+	}
+	closeMsg, ok := c().(components.ModalCloseMsg)
+	if !ok {
+		return WorkspaceModalNone, nexus.Workspace{}, nil
+	}
+	if !closeMsg.Result.Confirmed {
+		w.projectPickVisible = true
+		return WorkspaceModalNone, nexus.Workspace{}, nil
+	}
 	project, _ := closeMsg.Result.Values["project"].(string)
-	return WorkspaceModalAdd, nexus.Workspace{Name: name, Server: server, Project: project}, nil
+	return WorkspaceModalProjectPicked, nexus.Workspace{Name: w.pendingName, Server: w.pendingServer, Project: project}, nil
 }
 
 // IsAddFormVisible reports whether the "add workspace" sub-form is the
@@ -185,10 +290,17 @@ func (w *WorkspaceModal) ReturnToList(items []nexus.Workspace, current string) {
 	w.Show(items, current)
 }
 
-// View renders either the list or the add-form, whichever is active.
+// View renders whichever stage is active: the main list, the add-form,
+// the project-pick list, or the new-project text form.
 func (w *WorkspaceModal) View(screenWidth, screenHeight int) string {
 	if w.addForm.IsVisible() {
 		return w.addForm.View(screenWidth, screenHeight)
+	}
+	if w.newProjectForm.IsVisible() {
+		return w.newProjectForm.View(screenWidth, screenHeight)
+	}
+	if w.projectPickVisible {
+		return w.renderProjectPick(screenWidth, screenHeight)
 	}
 	if !w.visible {
 		return ""
@@ -239,6 +351,54 @@ func (w *WorkspaceModal) View(screenWidth, screenHeight int) string {
 		hint = "enter:import here  esc:cancel"
 	}
 	b.WriteString(hintStyle.Render(hint))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Mauve).
+		Padding(1, 2).
+		Width(width)
+
+	box := boxStyle.Render(b.String())
+
+	return lipgloss.Place(screenWidth, screenHeight, lipgloss.Center, lipgloss.Center, box)
+}
+
+// renderProjectPick draws the "pick a project on this server" list shown
+// between the add-form and the final Registry.Add, with a trailing
+// "+ New project..." entry that's always present (a brand-new server has
+// no projects listed yet, since none have had anything pushed to them).
+func (w *WorkspaceModal) renderProjectPick(screenWidth, screenHeight int) string {
+	width := 50
+	if width > screenWidth-4 {
+		width = screenWidth - 4
+	}
+
+	var b strings.Builder
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Mauve)
+	b.WriteString(titleStyle.Render("Pick a Project"))
+	b.WriteString("\n\n")
+
+	labels := append(append([]string{}, w.projectChoices...), "+ New project...")
+	for i, label := range labels {
+		marker := "  "
+		if i == w.projectCursor {
+			marker = "> "
+		}
+		lineStyle := lipgloss.NewStyle()
+		if i == w.projectCursor {
+			lineStyle = lineStyle.Foreground(styles.Crust).Background(styles.Mauve).Bold(true)
+		}
+		line := marker + label
+		if lipgloss.Width(line) < width-4 {
+			line += strings.Repeat(" ", width-4-lipgloss.Width(line))
+		}
+		b.WriteString(lineStyle.Render(line))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Subtext0)
+	b.WriteString(hintStyle.Render("enter:select  esc:cancel"))
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

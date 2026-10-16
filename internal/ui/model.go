@@ -516,17 +516,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.workspaceModal.IsAddFormVisible() {
 				action, added, _ := m.workspaceModal.UpdateAddForm(keyMsg)
 				switch action {
-				case WorkspaceModalAdd:
-					if err := m.nexusRegistry.Add(added); err != nil {
-						m.statusBar.Error(err)
-					} else if err := m.nexusRegistry.Save(); err != nil {
-						m.statusBar.Error(err)
-					} else {
-						m.statusBar.Success("Workspace", "added "+added.Name)
-					}
-					m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+				case WorkspaceModalNeedProjects:
+					m.connectAndShowProjectPick(added.Name, added.Server)
 				case WorkspaceModalCancel:
 					m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+				}
+				return m, nil
+			}
+
+			if m.workspaceModal.IsProjectPickVisible() {
+				action, chosen := m.workspaceModal.UpdateProjectPick(keyMsg)
+				switch action {
+				case WorkspaceModalProjectPicked:
+					m.finishAddWorkspace(chosen)
+				case WorkspaceModalCancel:
+					m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+				}
+				return m, nil
+			}
+
+			if m.workspaceModal.IsNewProjectFormVisible() {
+				action, chosen, _ := m.workspaceModal.UpdateNewProjectForm(keyMsg)
+				if action == WorkspaceModalProjectPicked {
+					m.finishAddWorkspace(chosen)
 				}
 				return m, nil
 			}

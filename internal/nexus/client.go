@@ -33,6 +33,21 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
+// ListProjects returns the name of every project this server currently
+// has data for - used when adding a workspace, so the user can pick a
+// project instead of typing its name blind. A brand-new project with
+// nothing pushed yet won't appear here; callers should still allow
+// typing a new name alongside whatever this returns.
+func (c *Client) ListProjects(ctx context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	resp, err := c.rpc.ListProjects(ctx, &nexuscurlv1.ListProjectsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetProjects(), nil
+}
+
 // Pull fetches the current snapshot of every Resource in a project.
 func (c *Client) Pull(ctx context.Context, project string) ([]*nexuscurlv1.Resource, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)

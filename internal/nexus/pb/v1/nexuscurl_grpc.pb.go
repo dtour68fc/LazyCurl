@@ -19,15 +19,19 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NexusCurlService_Pull_FullMethodName      = "/nexuscurl.v1.NexusCurlService/Pull"
-	NexusCurlService_Push_FullMethodName      = "/nexuscurl.v1.NexusCurlService/Push"
-	NexusCurlService_Subscribe_FullMethodName = "/nexuscurl.v1.NexusCurlService/Subscribe"
+	NexusCurlService_ListProjects_FullMethodName = "/nexuscurl.v1.NexusCurlService/ListProjects"
+	NexusCurlService_Pull_FullMethodName         = "/nexuscurl.v1.NexusCurlService/Pull"
+	NexusCurlService_Push_FullMethodName         = "/nexuscurl.v1.NexusCurlService/Push"
+	NexusCurlService_Subscribe_FullMethodName    = "/nexuscurl.v1.NexusCurlService/Subscribe"
 )
 
 // NexusCurlServiceClient is the client API for NexusCurlService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type NexusCurlServiceClient interface {
+	// Names of all projects this server currently has data for, so a
+	// client adding a workspace can pick one instead of typing blind.
+	ListProjects(ctx context.Context, in *ListProjectsRequest, opts ...grpc.CallOption) (*ListProjectsResponse, error)
 	// Full snapshot of a project's Collections + Environments.
 	Pull(ctx context.Context, in *PullRequest, opts ...grpc.CallOption) (*PullResponse, error)
 	// Publish a new revision of one Resource. Last-write-wins: whatever's
@@ -46,6 +50,16 @@ type nexusCurlServiceClient struct {
 
 func NewNexusCurlServiceClient(cc grpc.ClientConnInterface) NexusCurlServiceClient {
 	return &nexusCurlServiceClient{cc}
+}
+
+func (c *nexusCurlServiceClient) ListProjects(ctx context.Context, in *ListProjectsRequest, opts ...grpc.CallOption) (*ListProjectsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProjectsResponse)
+	err := c.cc.Invoke(ctx, NexusCurlService_ListProjects_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *nexusCurlServiceClient) Pull(ctx context.Context, in *PullRequest, opts ...grpc.CallOption) (*PullResponse, error) {
@@ -91,6 +105,9 @@ type NexusCurlService_SubscribeClient = grpc.ServerStreamingClient[ChangeNotific
 // All implementations must embed UnimplementedNexusCurlServiceServer
 // for forward compatibility.
 type NexusCurlServiceServer interface {
+	// Names of all projects this server currently has data for, so a
+	// client adding a workspace can pick one instead of typing blind.
+	ListProjects(context.Context, *ListProjectsRequest) (*ListProjectsResponse, error)
 	// Full snapshot of a project's Collections + Environments.
 	Pull(context.Context, *PullRequest) (*PullResponse, error)
 	// Publish a new revision of one Resource. Last-write-wins: whatever's
@@ -111,6 +128,9 @@ type NexusCurlServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedNexusCurlServiceServer struct{}
 
+func (UnimplementedNexusCurlServiceServer) ListProjects(context.Context, *ListProjectsRequest) (*ListProjectsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListProjects not implemented")
+}
 func (UnimplementedNexusCurlServiceServer) Pull(context.Context, *PullRequest) (*PullResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Pull not implemented")
 }
@@ -139,6 +159,24 @@ func RegisterNexusCurlServiceServer(s grpc.ServiceRegistrar, srv NexusCurlServic
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&NexusCurlService_ServiceDesc, srv)
+}
+
+func _NexusCurlService_ListProjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProjectsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NexusCurlServiceServer).ListProjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NexusCurlService_ListProjects_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NexusCurlServiceServer).ListProjects(ctx, req.(*ListProjectsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _NexusCurlService_Pull_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -195,6 +233,10 @@ var NexusCurlService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "nexuscurl.v1.NexusCurlService",
 	HandlerType: (*NexusCurlServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ListProjects",
+			Handler:    _NexusCurlService_ListProjects_Handler,
+		},
 		{
 			MethodName: "Pull",
 			Handler:    _NexusCurlService_Pull_Handler,

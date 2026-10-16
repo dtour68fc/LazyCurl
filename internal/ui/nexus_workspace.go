@@ -324,3 +324,44 @@ func (m Model) completeImport(target nexus.Workspace) (tea.Model, tea.Cmd) {
 	// active before.
 	return m.switchNexusWorkspace(target.Name)
 }
+
+// connectAndShowProjectPick is called once the "add workspace" form's
+// name+server fields are confirmed. It dials the new server, fetches its
+// current project list, and moves the modal on to the project-pick
+// stage - or shows an error and bounces back to the main list if the
+// server can't be reached at all. This blocks the UI briefly (same
+// synchronous-dial tradeoff already made by completeImport/
+// switchNexusWorkspace) rather than threading a tea.Cmd through, to keep
+// the add-workspace flow's error handling in one place.
+func (m Model) connectAndShowProjectPick(name, server string) {
+	client, err := nexus.Dial(server)
+	if err != nil {
+		m.statusBar.Error(fmt.Errorf("connecting to %s: %w", server, err))
+		m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+		return
+	}
+	defer client.Close()
+
+	projects, err := client.ListProjects(context.Background())
+	if err != nil {
+		m.statusBar.Error(fmt.Errorf("listing projects on %s: %w", server, err))
+		m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+		return
+	}
+
+	m.workspaceModal.ShowProjectPick(projects)
+}
+
+// finishAddWorkspace persists the workspace once a project has been
+// picked (or typed) in the add-workspace flow, then returns to the main
+// workspace list.
+func (m Model) finishAddWorkspace(ws nexus.Workspace) {
+	if err := m.nexusRegistry.Add(ws); err != nil {
+		m.statusBar.Error(err)
+	} else if err := m.nexusRegistry.Save(); err != nil {
+		m.statusBar.Error(err)
+	} else {
+		m.statusBar.Success("Workspace", "added "+ws.Name)
+	}
+	m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+}
