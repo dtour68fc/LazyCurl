@@ -19,7 +19,9 @@ import (
 //
 // Flow, now that a workspace is just a server connection with no single
 // fixed project:
-//   - The list (Show/Update): a/d add/remove a workspace, enter opens
+//   - The list (Show/Update): a/d add/remove a workspace, enter switches
+//     the view's project filter to it (local included - switching to
+//     local shows only unclaimed collections/environments), "e" opens
 //     that workspace's project checklist (a no-op on local, which has
 //     no projects).
 //   - addForm (UpdateAddForm): collects name+server only. On confirm the
@@ -41,7 +43,8 @@ type WorkspaceModal struct {
 	visible    bool
 	cursor     int
 	items      []nexus.Workspace
-	importMode bool // true when picking a push/pull target (see ShowForImport) rather than managing projects
+	current    string // name of the workspace whose filter is currently active, for the "(active)" marker
+	importMode bool   // true when picking a push/pull target (see ShowForImport) rather than managing projects
 
 	// addForm is a real components.Modal reused only for its working
 	// text-field flow, to collect name+server for a new collaborative
@@ -89,11 +92,14 @@ func NewWorkspaceModal() *WorkspaceModal {
 	}
 }
 
-// Show displays the list of workspaces.
-func (w *WorkspaceModal) Show(items []nexus.Workspace) {
+// Show displays the list of workspaces. current is the name of the
+// workspace whose filter is presently applied to the view (shown with an
+// "(active)" marker) - pass the empty string if unknown.
+func (w *WorkspaceModal) Show(items []nexus.Workspace, current string) {
 	w.visible = true
 	w.importMode = false
 	w.items = items
+	w.current = current
 	if w.cursor >= len(items) {
 		w.cursor = 0
 	}
@@ -136,7 +142,8 @@ const (
 	WorkspaceModalRemove
 	WorkspaceModalCancel
 	WorkspaceModalAdded         // add-form confirmed - caller should Registry.Add(added) and return to the list
-	WorkspaceModalOpenChecklist // enter on a workspace row - caller should dial+ListProjects, then ShowProjectChecklist
+	WorkspaceModalSwitch        // enter on a workspace row - caller should switch the view's project filter to it
+	WorkspaceModalOpenChecklist // "e" on a workspace row - caller should dial+ListProjects, then ShowProjectChecklist
 	WorkspaceModalChecklistSaved
 	// WorkspaceModalImportTarget fires once BOTH the target workspace and
 	// the project name have been chosen during ShowForImport - the
@@ -174,6 +181,15 @@ func (w *WorkspaceModal) Update(msg tea.KeyMsg) (action WorkspaceModalAction, se
 				w.newProjectForm.Show()
 				return WorkspaceModalNone, nexus.Workspace{}
 			}
+			w.Hide()
+			return WorkspaceModalSwitch, sel
+		}
+	case "e":
+		if w.importMode {
+			break // managing projects mid-import isn't supported
+		}
+		if w.cursor >= 0 && w.cursor < len(w.items) {
+			sel := w.items[w.cursor]
 			if sel.IsLocal() {
 				break // local has no projects to manage
 			}
@@ -398,9 +414,10 @@ func (w *WorkspaceModal) UpdateNewProjectForm(msg tea.KeyMsg) (action WorkspaceM
 }
 
 // ReturnToList re-shows the list after a sub-stage closes, refreshed
-// with the given items (so a just-added/changed workspace shows up).
-func (w *WorkspaceModal) ReturnToList(items []nexus.Workspace) {
-	w.Show(items)
+// with the given items and current workspace (so a just-added/changed
+// workspace shows up, and the "(active)" marker stays accurate).
+func (w *WorkspaceModal) ReturnToList(items []nexus.Workspace, current string) {
+	w.Show(items, current)
 }
 
 // View renders whichever stage is active: the main list, the add-form,
@@ -445,6 +462,9 @@ func (w *WorkspaceModal) View(screenWidth, screenHeight int) string {
 				label += fmt.Sprintf("  (%s)", strings.Join(ws.Projects, ", "))
 			}
 		}
+		if !w.importMode && ws.Name == w.current {
+			label += "  (active)"
+		}
 		lineStyle := lipgloss.NewStyle()
 		if i == w.cursor {
 			lineStyle = lineStyle.Foreground(styles.Crust).Background(styles.Mauve).Bold(true)
@@ -459,7 +479,7 @@ func (w *WorkspaceModal) View(screenWidth, screenHeight int) string {
 
 	b.WriteString("\n")
 	hintStyle := lipgloss.NewStyle().Foreground(styles.Subtext0)
-	hint := "enter:projects  a:add  d:remove  esc:cancel"
+	hint := "enter:switch  e:projects  a:add  d:remove  esc:cancel"
 	if w.importMode {
 		hint = "enter:use this workspace  esc:cancel"
 	}

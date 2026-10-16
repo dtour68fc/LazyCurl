@@ -20,6 +20,13 @@ type CollectionsView struct {
 	tree            *components.Tree
 	collections     []*api.CollectionFile
 	clipboard       *components.TreeNode // For yank/paste
+
+	// projectFilter, when non-nil, hides any collection whose Project
+	// doesn't satisfy the predicate - the in-memory "switch workspace"
+	// view filter over the single shared global collections directory.
+	// nil means show everything (the default, and the behavior before
+	// this filter existed).
+	projectFilter func(project string) bool
 }
 
 // NewCollectionsView creates a new collections view
@@ -59,7 +66,17 @@ func (c *CollectionsView) loadCollections() {
 		global = []*api.CollectionFile{}
 	}
 
-	c.collections = mergeCollectionsByPath(local, global)
+	merged := mergeCollectionsByPath(local, global)
+	if c.projectFilter != nil {
+		filtered := make([]*api.CollectionFile, 0, len(merged))
+		for _, col := range merged {
+			if c.projectFilter(col.Project) {
+				filtered = append(filtered, col)
+			}
+		}
+		merged = filtered
+	}
+	c.collections = merged
 	c.tree = components.NewTree(c.collections)
 }
 
@@ -148,6 +165,15 @@ func (c *CollectionsView) SetCollectionsPath(path string) {
 // GetCollections returns the loaded collections
 func (c *CollectionsView) GetCollections() []*api.CollectionFile {
 	return c.collections
+}
+
+// SetProjectFilter installs (or clears, with nil) the in-memory predicate
+// used to hide collections whose Project the predicate rejects, and
+// reloads immediately so the change takes effect. This is the
+// "switch workspace" view filter - it doesn't touch what's on disk.
+func (c *CollectionsView) SetProjectFilter(pred func(project string) bool) {
+	c.projectFilter = pred
+	c.ReloadCollections()
 }
 
 // HasProject returns true if any collection is tagged with the given project.

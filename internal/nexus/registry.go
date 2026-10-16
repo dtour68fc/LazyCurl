@@ -45,6 +45,13 @@ func (w Workspace) IsLocal() bool {
 // config.GetNexusWorkspacesPath().
 type Registry struct {
 	Workspaces []Workspace `yaml:"workspaces"`
+	// Current is the name of the workspace whose project filter is
+	// currently applied to the Collections/Environments view. This is
+	// purely a view concern - it has nothing to do with storage (every
+	// workspace's imported resources always live in the same global
+	// directories) or with push/pull resolution (FindProjectWorkspace
+	// doesn't consult it).
+	Current string `yaml:"current,omitempty"`
 }
 
 // Load reads the registry from disk, creating a fresh one (just the
@@ -70,12 +77,17 @@ func Load() (*Registry, error) {
 func defaultRegistry() *Registry {
 	return &Registry{
 		Workspaces: []Workspace{{Name: LocalWorkspaceName}},
+		Current:    LocalWorkspaceName,
 	}
 }
 
 // ensureLocal guarantees the local workspace exists (as the first entry)
-// even if a hand-edited or corrupted file is missing it.
+// even if a hand-edited or corrupted file is missing it, and that Current
+// defaults to local if unset.
 func (r *Registry) ensureLocal() {
+	if r.Current == "" {
+		r.Current = LocalWorkspaceName
+	}
 	for _, w := range r.Workspaces {
 		if w.IsLocal() {
 			return
@@ -108,6 +120,28 @@ func (r *Registry) Get(name string) (Workspace, bool) {
 		}
 	}
 	return Workspace{}, false
+}
+
+// SetCurrent records which workspace's project filter is currently
+// applied to the view. Returns an error if name isn't a configured
+// workspace (including "local", which must still be present/valid).
+func (r *Registry) SetCurrent(name string) error {
+	if _, ok := r.Get(name); !ok {
+		return fmt.Errorf("no workspace named %q", name)
+	}
+	r.Current = name
+	return nil
+}
+
+// CurrentWorkspace returns the workspace named by Current, falling back
+// to the local workspace if Current is empty or no longer valid (e.g. the
+// workspace it pointed at was removed).
+func (r *Registry) CurrentWorkspace() Workspace {
+	if w, ok := r.Get(r.Current); ok {
+		return w
+	}
+	w, _ := r.Get(LocalWorkspaceName)
+	return w
 }
 
 // Add registers a new collaborative workspace - just name+server;

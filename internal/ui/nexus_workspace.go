@@ -187,6 +187,46 @@ func (m Model) reloadNexusPanels() {
 	m.leftPanel.GetEnvironments().ReloadEnvironments()
 }
 
+// workspaceProjectPredicate computes the project-filter predicate for ws,
+// given the full registry (needed for the local workspace's "unclaimed"
+// case, which has to know every other workspace's selected projects).
+// Shared by both startup (before a Model exists to call a method on) and
+// applyWorkspaceFilter, so the two can't drift out of sync.
+func workspaceProjectPredicate(reg *nexus.Registry, ws nexus.Workspace) func(project string) bool {
+	if !ws.IsLocal() {
+		selected := make(map[string]bool, len(ws.Projects))
+		for _, p := range ws.Projects {
+			selected[p] = true
+		}
+		return func(project string) bool { return selected[project] }
+	}
+
+	// Local: show only "unclaimed" collections/environments - those not
+	// tagged with a project any configured workspace currently has
+	// selected. An empty Project is never claimed, so it's naturally
+	// included here too.
+	claimed := make(map[string]bool)
+	for _, w := range reg.Workspaces {
+		if w.IsLocal() {
+			continue
+		}
+		for _, p := range w.Projects {
+			claimed[p] = true
+		}
+	}
+	return func(project string) bool { return !claimed[project] }
+}
+
+// applyWorkspaceFilter installs the project filter for ws on both the
+// Collections and Environments panels - the in-memory "switch workspace"
+// view over the single shared global directories (see
+// workspaceProjectPredicate for the predicate itself).
+func (m Model) applyWorkspaceFilter(ws nexus.Workspace) {
+	pred := workspaceProjectPredicate(m.nexusRegistry, ws)
+	m.leftPanel.GetCollections().SetProjectFilter(pred)
+	m.leftPanel.GetEnvironments().SetProjectFilter(pred)
+}
+
 // beginLinkFlow opens the workspace list in import/link mode for a
 // resource whose Project couldn't be resolved to a configured workspace
 // (or that the user explicitly wants to [re]link via "I"). Once a target
@@ -360,6 +400,25 @@ func (m Model) linkProjectToWorkspace(workspaceName, project string) {
 	}
 }
 
+// switchWorkspace makes ws the view's current workspace: persists it as
+// Registry.Current, installs its project filter on both panels, and
+// updates the status bar - the "enter on a workspace row" action, now
+// separate from managing its projects (see WorkspaceModalSwitch).
+func (m Model) switchWorkspace(ws nexus.Workspace) (tea.Model, tea.Cmd) {
+	if err := m.nexusRegistry.SetCurrent(ws.Name); err != nil {
+		m.statusBar.Error(err)
+		return m, nil
+	}
+	if err := m.nexusRegistry.Save(); err != nil {
+		m.statusBar.Error(err)
+	}
+	m.applyWorkspaceFilter(ws)
+	m.statusBar.SetWorkspace(ws.Name)
+	m.workspaceModal.Hide()
+	m.statusBar.Success("Workspace", "switched to "+ws.Name)
+	return m, nil
+}
+
 // handleAddWorkspace registers a brand-new workspace (name+server only,
 // no projects yet) and returns to the workspace list.
 func (m Model) handleAddWorkspace(ws nexus.Workspace) (tea.Model, tea.Cmd) {
@@ -370,7 +429,7 @@ func (m Model) handleAddWorkspace(ws nexus.Workspace) (tea.Model, tea.Cmd) {
 	} else {
 		m.statusBar.Success("Workspace", "added "+ws.Name)
 	}
-	m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces)
+	m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
 	return m, nil
 }
 
@@ -384,7 +443,7 @@ func (m Model) openProjectChecklistFor(ws nexus.Workspace) {
 	client, err := nexus.Dial(ws.Server)
 	if err != nil {
 		m.statusBar.Error(fmt.Errorf("connecting to %s: %w", ws.Server, err))
-		m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces)
+		m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
 		return
 	}
 	defer client.Close()
@@ -392,7 +451,7 @@ func (m Model) openProjectChecklistFor(ws nexus.Workspace) {
 	projects, err := client.ListProjects(context.Background())
 	if err != nil {
 		m.statusBar.Error(fmt.Errorf("listing projects on %s: %w", ws.Server, err))
-		m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces)
+		m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
 		return
 	}
 
@@ -439,7 +498,7 @@ func (m Model) applyProjectChecklist(workspaceName string, finalProjects []strin
 		c, err := nexus.Dial(ws.Server)
 		if err != nil {
 			m.statusBar.Error(fmt.Errorf("connecting to %s: %w", ws.Server, err))
-			m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces)
+			m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
 			return m, nil
 		}
 		client = c
@@ -476,12 +535,19 @@ func (m Model) applyProjectChecklist(workspaceName string, finalProjects []strin
 	}
 
 	m.reloadNexusPanels()
-	// Applying the checklist is the end of this flow, not a step back
-	// toward managing more workspaces - close the modal outright so the
-	// user lands straight back in the session with the newly imported
-	// collections/environments visible, instead of staring at the
-	// workspace list again.
-	m.workspaceModal.Hide()
+	// If the workspace just edited is the one currently being viewed,
+	// its filter predicate is now stale (the membership it depends on
+	// just changed) - recompute and reinstall it so the panels reflect
+	// the edit immediately, without requiring an extra switch.
+	if workspaceName == m.nexusRegistry.Current {
+		if fresh, ok := m.nexusRegistry.Get(workspaceName); ok {
+			m.applyWorkspaceFilter(fresh)
+		}
+	}
+	// Applying the checklist returns to the list (not a full close) -
+	// managing projects is a side step from switching, so the user can
+	// then press enter to actually switch to/view what they just edited.
+	m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
 	m.statusBar.Success("Workspace", fmt.Sprintf("%s: imported %d, removed %d", ws.Name, importedTotal, removedTotal))
 
 	return m, nil

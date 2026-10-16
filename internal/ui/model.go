@@ -332,8 +332,17 @@ func NewModel(globalConfig *config.GlobalConfig, workspaceConfig *config.Workspa
 	// fresh, so there's nothing to reconnect at startup.
 	nexusReg, err := nexus.Load()
 	if err != nil {
-		nexusReg = &nexus.Registry{Workspaces: []nexus.Workspace{{Name: nexus.LocalWorkspaceName}}}
+		nexusReg = &nexus.Registry{Workspaces: []nexus.Workspace{{Name: nexus.LocalWorkspaceName}}, Current: nexus.LocalWorkspaceName}
 	}
+
+	// Apply the current workspace's project filter before the first
+	// frame renders, so Collections/Environments already show the right
+	// subset rather than everything merged together.
+	currentWs := nexusReg.CurrentWorkspace()
+	startupPred := workspaceProjectPredicate(nexusReg, currentWs)
+	leftPanel.GetCollections().SetProjectFilter(startupPred)
+	leftPanel.GetEnvironments().SetProjectFilter(startupPred)
+	statusBar.SetWorkspace(currentWs.Name)
 
 	return Model{
 		globalConfig:       globalConfig,
@@ -471,7 +480,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case WorkspaceModalAdded:
 					return m.handleAddWorkspace(added)
 				case WorkspaceModalCancel:
-					m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces)
+					m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
 				}
 				return m, nil
 			}
@@ -482,7 +491,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case WorkspaceModalChecklistSaved:
 					return m.applyProjectChecklist(result.Name, result.Projects)
 				case WorkspaceModalCancel:
-					m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces)
+					m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
 				}
 				return m, nil
 			}
@@ -497,6 +506,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			action, selected := m.workspaceModal.Update(keyMsg)
 			switch action {
+			case WorkspaceModalSwitch:
+				return m.switchWorkspace(selected)
 			case WorkspaceModalOpenChecklist:
 				m.openProjectChecklistFor(selected)
 			case WorkspaceModalImportTarget:
@@ -509,7 +520,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.statusBar.Success("Workspace", "removed "+selected.Name)
 				}
-				m.workspaceModal.Show(m.nexusRegistry.Workspaces)
+				m.workspaceModal.Show(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
 			}
 		}
 		return m, nil
@@ -899,7 +910,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// collaborative server connections). Scoped to the Collections
 			// panel to avoid colliding with any future per-panel use of W.
 			if m.activePanel == CollectionsPanel && msg.String() == "W" {
-				m.workspaceModal.Show(m.nexusRegistry.Workspaces)
+				m.workspaceModal.Show(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
 				return m, nil
 			}
 

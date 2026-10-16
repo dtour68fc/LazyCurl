@@ -101,6 +101,11 @@ type EnvironmentsView struct {
 	renameModal *components.Modal
 	caCertModal *components.Modal // Sets an EnvNode's custom CA cert path (T)
 	pendingNode *EnvTreeNode      // Node being acted upon
+
+	// projectFilter, when non-nil, hides any environment whose Project
+	// doesn't satisfy the predicate - mirrors CollectionsView's filter,
+	// see its doc comment.
+	projectFilter func(project string) bool
 }
 
 // NewEnvironmentsView creates a new environments view
@@ -162,7 +167,17 @@ func (e *EnvironmentsView) loadEnvironments() {
 		global = []*api.EnvironmentFile{}
 	}
 
-	e.environments = mergeEnvironmentsByPath(local, global)
+	merged := mergeEnvironmentsByPath(local, global)
+	if e.projectFilter != nil {
+		filtered := make([]*api.EnvironmentFile, 0, len(merged))
+		for _, env := range merged {
+			if e.projectFilter(env.Project) {
+				filtered = append(filtered, env)
+			}
+		}
+		merged = filtered
+	}
+	e.environments = merged
 	e.buildTree()
 	e.refresh()
 
@@ -1668,6 +1683,14 @@ func (e *EnvironmentsView) GetEnvironmentsPath() string {
 // GetEnvironments returns the loaded environments.
 func (e *EnvironmentsView) GetEnvironments() []*api.EnvironmentFile {
 	return e.environments
+}
+
+// SetProjectFilter installs (or clears, with nil) the in-memory predicate
+// used to hide environments whose Project the predicate rejects, and
+// reloads immediately so the change takes effect.
+func (e *EnvironmentsView) SetProjectFilter(pred func(project string) bool) {
+	e.projectFilter = pred
+	e.ReloadEnvironments()
 }
 
 // SetEnvironmentsPath redirects where environments are loaded from/saved
