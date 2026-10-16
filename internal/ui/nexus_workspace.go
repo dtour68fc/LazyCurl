@@ -476,7 +476,12 @@ func (m Model) applyProjectChecklist(workspaceName string, finalProjects []strin
 	}
 
 	m.reloadNexusPanels()
-	m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces)
+	// Applying the checklist is the end of this flow, not a step back
+	// toward managing more workspaces - close the modal outright so the
+	// user lands straight back in the session with the newly imported
+	// collections/environments visible, instead of staring at the
+	// workspace list again.
+	m.workspaceModal.Hide()
 	m.statusBar.Success("Workspace", fmt.Sprintf("%s: imported %d, removed %d", ws.Name, importedTotal, removedTotal))
 
 	return m, nil
