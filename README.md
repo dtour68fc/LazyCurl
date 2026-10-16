@@ -110,6 +110,35 @@ lazycurl mcp --server 10.10.1.107:29500 --project PMC --api-key ncmcp_xxxx...
 matching NexusCurlServer's opt-in key gating (see its README for issuing
 keys with `nexuscurlserver keygen`).
 
+### Setting it up from the TUI
+
+Press `W` to open the workspace list, `e` on a server to open its project
+checklist, then `m` on a project row to generate a `.mcp.json` entry for
+it in the current directory - paste an API key if you have one (optional,
+can be added/updated later by pressing `m` again), or leave it blank to
+start unauthenticated. This writes/merges a `.mcp.json` like:
+
+```json
+{
+  "mcpServers": {
+    "nexuscurl-PMC": {
+      "command": "lazycurl",
+      "args": ["mcp", "--server", "10.10.1.107:29500", "--project", "PMC", "--api-key", "ncmcp_xxxx..."]
+    }
+  }
+}
+```
+
+`.mcp.json` with a top-level `mcpServers` object is the convention most
+MCP-aware CLIs/agents (Claude Code, Cursor, and others) already read for
+project-scoped server config, so this file is usually all that's needed -
+no manual config required on the agent side. Repeating `m` for more
+projects (even across different servers) accumulates additional entries
+in the same file instead of overwriting it.
+
+For CLIs that expect a different top-level shape (e.g. VS Code's
+`mcp.json` uses `servers` instead of `mcpServers`), use the example below.
+
 Example MCP client config (VS Code `mcp.json`):
 
 ```json

@@ -496,11 +496,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			if m.workspaceModal.IsNewProjectFormVisible() {
-				action, chosen, _ := m.workspaceModal.UpdateNewProjectForm(keyMsg)
-				if action == WorkspaceModalImportTarget {
-					return m.completeImport(chosen)
+			if m.workspaceModal.IsMCPFormVisible() {
+				action, chosen, apiKey := m.workspaceModal.UpdateMCPForm(keyMsg)
+				if action == WorkspaceModalMCPSetup {
+					return m.completeMCPSetup(chosen.Name, chosen.Projects[0], apiKey)
 				}
+				return m, nil
+			}
+
+			if m.workspaceModal.IsNewProjectFormVisible() {
+				m.workspaceModal.UpdateNewProjectForm(keyMsg)
 				return m, nil
 			}
 

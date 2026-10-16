@@ -237,7 +237,7 @@ func (m Model) beginLinkFlow(res *nexuscurlv1.Resource, label string, isPull boo
 	m.pendingLinkIsPull = isPull
 	m.pendingLinkColl = coll
 	m.pendingLinkEnv = env
-	m.workspaceModal.ShowForImport(targets)
+	m.workspaceModal.ShowForImport(targets, label)
 	return m, nil
 }
 
@@ -363,6 +363,43 @@ func (m Model) completeImport(target nexus.Workspace) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	return m, nil
+}
+
+// completeMCPSetup writes (merging with anything already there) a
+// .mcp.json entry in the current directory for project on workspaceName's
+// server, under the "mcpServers" convention most MCP-aware CLIs/agents
+// already read for project-scoped server config. apiKey may be empty -
+// the server's API-key gating is opt-in, so an unauthenticated entry is
+// a fully valid starting point; pressing "m" again later with a real key
+// (once one's been issued via nexuscurlserver keygen) overwrites this
+// same entry in place.
+func (m Model) completeMCPSetup(workspaceName, project, apiKey string) (tea.Model, tea.Cmd) {
+	ws, ok := m.nexusRegistry.Get(workspaceName)
+	if !ok {
+		m.statusBar.Error(fmt.Errorf("workspace %q not found", workspaceName))
+		return m, nil
+	}
+
+	args := []string{"mcp", "--server", ws.Server, "--project", project}
+	if apiKey != "" {
+		args = append(args, "--api-key", apiKey)
+	}
+
+	entryName := "nexuscurl-" + project
+	if err := nexus.WriteMCPConfig(".mcp.json", entryName, nexus.MCPConfigEntry{
+		Command: "lazycurl",
+		Args:    args,
+	}); err != nil {
+		m.statusBar.Error(fmt.Errorf("writing .mcp.json: %w", err))
+		return m, nil
+	}
+
+	if apiKey == "" {
+		m.statusBar.Success("MCP", fmt.Sprintf(".mcp.json -> %q (no API key - press m again once you have one)", entryName))
+	} else {
+		m.statusBar.Success("MCP", fmt.Sprintf(".mcp.json -> %q", entryName))
+	}
 	return m, nil
 }
 

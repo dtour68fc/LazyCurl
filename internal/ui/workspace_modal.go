@@ -34,11 +34,11 @@ import (
 //     row. space/enter toggles a row, "s" saves and returns the final
 //     checked set to the caller (which imports newly-checked projects
 //     and removes newly-unchecked ones), esc/q cancels without saving.
-//   - newProjectForm is reused for two distinct purposes depending on
-//     newProjectTarget: adding a freeform project name to the open
-//     checklist, or (during ShowForImport) naming/confirming which
-//     project an unresolvable push/pull should use on the chosen target
-//     workspace.
+//   - newProjectForm collects a freeform project name to add to the open
+//     checklist's "+ New project..." row. The import flow (ShowForImport)
+//     no longer uses it - it commits the source collection/environment's
+//     own Name as the project name directly, so collection and project
+//     names always match.
 type WorkspaceModal struct {
 	visible    bool
 	cursor     int
@@ -58,26 +58,24 @@ type WorkspaceModal struct {
 	checklistChecked   map[string]bool
 	checklistCursor    int
 
-	// newProjectForm collects a freeform project name - either a brand
-	// new entry for the open checklist, or (during the import flow) the
-	// project name to push/pull-link an unresolvable resource against.
+	// newProjectForm collects a freeform project name to add (checked) to
+	// the open checklist's "+ New project..." row.
 	newProjectForm *components.Modal
-	// newProjectTarget distinguishes which of the two newProjectForm
-	// uses is active, since confirming it needs to behave differently.
-	newProjectTarget newProjectTarget
 
-	// importWorkspace is set once the import-mode list picks a target
-	// workspace, ahead of the project-name prompt that follows it.
-	importWorkspace nexus.Workspace
+	// mcpKeyForm prompts for an (optional) API key when "m" is pressed
+	// on a checklist project row - see UpdateMCPForm. Empty is a valid
+	// answer (the server's API-key gating is opt-in).
+	mcpKeyForm   *components.Modal
+	mcpWorkspace string // workspace name the "m" keybind was pressed under
+	mcpProject   string // project name the "m" keybind was pressed on
+
+	// importProjectName is the project name ShowForImport was given -
+	// always the source collection/environment's own Name, so project
+	// and collection names stay identical in every case. Enter on a
+	// target workspace commits immediately against this name; there is
+	// no free-text project prompt during import anymore.
+	importProjectName string
 }
-
-// newProjectTarget says what a confirmed newProjectForm submission is for.
-type newProjectTarget int
-
-const (
-	newProjectForChecklist newProjectTarget = iota
-	newProjectForImport
-)
 
 // NewWorkspaceModal creates a hidden workspace-switcher modal.
 func NewWorkspaceModal() *WorkspaceModal {
@@ -88,6 +86,9 @@ func NewWorkspaceModal() *WorkspaceModal {
 		}),
 		newProjectForm: components.NewFormModal("Project", "nexus_new_project", []components.FormField{
 			{Name: "project", Label: "Project", Type: "text", Placeholder: "e.g. PMC"},
+		}),
+		mcpKeyForm: components.NewFormModal("MCP Setup", "nexus_mcp_apikey", []components.FormField{
+			{Name: "apikey", Label: "API Key (optional)", Type: "text", Placeholder: "paste key, or leave blank"},
 		}),
 	}
 }
@@ -109,12 +110,16 @@ func (w *WorkspaceModal) Show(items []nexus.Workspace, current string) {
 // used to resolve an unresolvable collection/environment (no Project tag,
 // or a Project no workspace currently has selected) against a
 // collaborative workspace. Local itself is never a valid target, so
-// callers should already have filtered it out of items.
-func (w *WorkspaceModal) ShowForImport(items []nexus.Workspace) {
+// callers should already have filtered it out of items. projectName is
+// the source collection/environment's own Name - it's used verbatim as
+// the project name once a target workspace is picked, so collection and
+// project names never diverge.
+func (w *WorkspaceModal) ShowForImport(items []nexus.Workspace, projectName string) {
 	w.visible = true
 	w.importMode = true
 	w.items = items
 	w.cursor = 0
+	w.importProjectName = projectName
 }
 
 // Hide closes the list and every sub-stage.
@@ -123,11 +128,12 @@ func (w *WorkspaceModal) Hide() {
 	w.checklistVisible = false
 	w.addForm.Hide()
 	w.newProjectForm.Hide()
+	w.mcpKeyForm.Hide()
 }
 
 // IsVisible reports whether the list or any sub-stage is showing.
 func (w *WorkspaceModal) IsVisible() bool {
-	return w.visible || w.addForm.IsVisible() || w.checklistVisible || w.newProjectForm.IsVisible()
+	return w.visible || w.addForm.IsVisible() || w.checklistVisible || w.newProjectForm.IsVisible() || w.mcpKeyForm.IsVisible()
 }
 
 // WorkspaceModalAction is what the caller should do after Update
@@ -145,12 +151,16 @@ const (
 	WorkspaceModalSwitch        // enter on a workspace row - caller should switch the view's project filter to it
 	WorkspaceModalOpenChecklist // "e" on a workspace row - caller should dial+ListProjects, then ShowProjectChecklist
 	WorkspaceModalChecklistSaved
-	// WorkspaceModalImportTarget fires once BOTH the target workspace and
-	// the project name have been chosen during ShowForImport - the
-	// returned Workspace carries Name/Server as usual, plus the chosen
-	// project name as its single Projects[0] entry (not a real project
-	// list - just a convenient way to return one extra string alongside
-	// the workspace without a second return type).
+	// WorkspaceModalMCPSetup fires once the "m" keybind on a checklist
+	// project row has its API-key prompt confirmed - see UpdateMCPForm.
+	WorkspaceModalMCPSetup
+	// WorkspaceModalImportTarget fires as soon as a target workspace is
+	// picked during ShowForImport - the returned Workspace carries
+	// Name/Server as usual, plus the source collection/environment's own
+	// Name as its single Projects[0] entry (not a real project list -
+	// just a convenient way to return one extra string alongside the
+	// workspace without a second return type). There's no separate
+	// project-name prompt: project and collection names always match.
 	WorkspaceModalImportTarget
 )
 
@@ -174,12 +184,9 @@ func (w *WorkspaceModal) Update(msg tea.KeyMsg) (action WorkspaceModalAction, se
 		if w.cursor >= 0 && w.cursor < len(w.items) {
 			sel := w.items[w.cursor]
 			if w.importMode {
-				w.visible = false
-				w.importWorkspace = sel
-				w.newProjectTarget = newProjectForImport
-				w.newProjectForm.SetFieldValue("project", "")
-				w.newProjectForm.Show()
-				return WorkspaceModalNone, nexus.Workspace{}
+				w.Hide()
+				sel.Projects = []string{w.importProjectName}
+				return WorkspaceModalImportTarget, sel
 			}
 			w.Hide()
 			return WorkspaceModalSwitch, sel
@@ -321,6 +328,17 @@ func (w *WorkspaceModal) UpdateChecklist(msg tea.KeyMsg) (action WorkspaceModalA
 			project := w.checklistItems[w.checklistCursor]
 			w.checklistChecked[project] = !w.checklistChecked[project]
 		}
+	case "m":
+		// "m" on a real project row opens the MCP-connection API-key
+		// prompt for that project; no-op on "+ New project...".
+		if w.checklistCursor < len(w.checklistItems) {
+			w.checklistVisible = false
+			w.mcpWorkspace = w.checklistWorkspace
+			w.mcpProject = w.checklistItems[w.checklistCursor]
+			w.mcpKeyForm.SetFieldValue("apikey", "")
+			w.mcpKeyForm.Show()
+			return WorkspaceModalNone, nexus.Workspace{}
+		}
 	case "enter":
 		// Enter on "+ New project..." opens the text sub-form to add a
 		// brand-new project (checked) to the list. Enter anywhere else
@@ -328,7 +346,6 @@ func (w *WorkspaceModal) UpdateChecklist(msg tea.KeyMsg) (action WorkspaceModalA
 		// "s" used to perform; "s" is kept as an alias below.
 		if w.checklistCursor == len(w.checklistItems) {
 			w.checklistVisible = false
-			w.newProjectTarget = newProjectForChecklist
 			w.newProjectForm.SetFieldValue("project", "")
 			w.newProjectForm.Show()
 			return WorkspaceModalNone, nexus.Workspace{}
@@ -359,14 +376,11 @@ func (w *WorkspaceModal) checkedProjects() []string {
 }
 
 // UpdateNewProjectForm forwards a key to the freeform project-name text
-// sub-form. On confirm, behavior depends on which flow opened it:
-//   - checklist: the typed name is added (checked) to the open checklist,
-//     which is then re-shown (WorkspaceModalNone, checklist still active).
-//   - import: returns WorkspaceModalImportTarget with the chosen
-//     workspace + typed project name (see that action's doc comment).
-//
-// On cancel, the checklist flow returns to the checklist; the import
-// flow returns to the top-level list.
+// sub-form, used only to add a freeform project name to the open
+// checklist's "+ New project..." row. On confirm, the typed name is
+// added (checked) to the open checklist, which is then re-shown
+// (WorkspaceModalNone, checklist still active). On cancel, returns to
+// the checklist without changes.
 func (w *WorkspaceModal) UpdateNewProjectForm(msg tea.KeyMsg) (action WorkspaceModalAction, result nexus.Workspace, cmd tea.Cmd) {
 	var c tea.Cmd
 	w.newProjectForm, c = w.newProjectForm.Update(msg)
@@ -378,39 +392,61 @@ func (w *WorkspaceModal) UpdateNewProjectForm(msg tea.KeyMsg) (action WorkspaceM
 		return WorkspaceModalNone, nexus.Workspace{}, nil
 	}
 	if !closeMsg.Result.Confirmed {
-		if w.newProjectTarget == newProjectForChecklist {
-			w.checklistVisible = true
-		} else {
-			w.visible = true
-		}
+		w.checklistVisible = true
 		return WorkspaceModalNone, nexus.Workspace{}, nil
 	}
 	project, _ := closeMsg.Result.Values["project"].(string)
 
-	if w.newProjectTarget == newProjectForChecklist {
-		if project != "" {
-			found := false
-			for _, p := range w.checklistItems {
-				if p == project {
-					found = true
-					break
-				}
+	if project != "" {
+		found := false
+		for _, p := range w.checklistItems {
+			if p == project {
+				found = true
+				break
 			}
-			if !found {
-				w.checklistItems = append(w.checklistItems, project)
-			}
-			if w.checklistChecked == nil {
-				w.checklistChecked = map[string]bool{}
-			}
-			w.checklistChecked[project] = true
 		}
-		w.checklistVisible = true
-		return WorkspaceModalNone, nexus.Workspace{}, nil
+		if !found {
+			w.checklistItems = append(w.checklistItems, project)
+		}
+		if w.checklistChecked == nil {
+			w.checklistChecked = map[string]bool{}
+		}
+		w.checklistChecked[project] = true
 	}
+	w.checklistVisible = true
+	return WorkspaceModalNone, nexus.Workspace{}, nil
+}
 
-	target := w.importWorkspace
-	target.Projects = []string{project}
-	return WorkspaceModalImportTarget, target, nil
+// IsMCPFormVisible reports whether the "set up MCP connection" API-key
+// prompt (opened by "m" on a checklist project row) is currently
+// showing.
+func (w *WorkspaceModal) IsMCPFormVisible() bool {
+	return w.mcpKeyForm.IsVisible()
+}
+
+// UpdateMCPForm forwards a key to the API-key prompt. On confirm,
+// returns WorkspaceModalMCPSetup with the workspace name (result.Name)
+// and project (result.Projects[0]) the keybind was pressed on, plus the
+// typed API key - an empty key is a fully valid choice, since the
+// server's gating is opt-in. On cancel, re-shows the checklist without
+// writing anything.
+func (w *WorkspaceModal) UpdateMCPForm(msg tea.KeyMsg) (action WorkspaceModalAction, result nexus.Workspace, apiKey string) {
+	var c tea.Cmd
+	w.mcpKeyForm, c = w.mcpKeyForm.Update(msg)
+	if c == nil {
+		return WorkspaceModalNone, nexus.Workspace{}, ""
+	}
+	closeMsg, ok := c().(components.ModalCloseMsg)
+	if !ok {
+		return WorkspaceModalNone, nexus.Workspace{}, ""
+	}
+	if !closeMsg.Result.Confirmed {
+		w.checklistVisible = true
+		return WorkspaceModalNone, nexus.Workspace{}, ""
+	}
+	key, _ := closeMsg.Result.Values["apikey"].(string)
+	target := nexus.Workspace{Name: w.mcpWorkspace, Projects: []string{w.mcpProject}}
+	return WorkspaceModalMCPSetup, target, strings.TrimSpace(key)
 }
 
 // ReturnToList re-shows the list after a sub-stage closes, refreshed
@@ -428,6 +464,9 @@ func (w *WorkspaceModal) View(screenWidth, screenHeight int) string {
 	}
 	if w.newProjectForm.IsVisible() {
 		return w.newProjectForm.View(screenWidth, screenHeight)
+	}
+	if w.mcpKeyForm.IsVisible() {
+		return w.mcpKeyForm.View(screenWidth, screenHeight)
 	}
 	if w.checklistVisible {
 		return w.renderChecklist(screenWidth, screenHeight)
@@ -549,7 +588,7 @@ func (w *WorkspaceModal) renderChecklist(screenWidth, screenHeight int) string {
 	b.WriteString("\n\n")
 
 	hintStyle := lipgloss.NewStyle().Foreground(styles.Subtext0)
-	b.WriteString(hintStyle.Render("space:toggle  enter:apply  esc:cancel"))
+	b.WriteString(hintStyle.Render("space:toggle  m:mcp setup  enter:apply  esc:cancel"))
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
