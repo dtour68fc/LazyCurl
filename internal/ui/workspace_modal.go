@@ -64,7 +64,9 @@ type WorkspaceModal struct {
 
 	// mcpKeyForm prompts for an (optional) API key when "m" is pressed
 	// on a checklist project row - see UpdateMCPForm. Empty is a valid
-	// answer (the server's API-key gating is opt-in).
+	// answer (the server's API-key gating is opt-in). .mcp.json is
+	// written to the current working directory - launch lazycurl from
+	// the project repo you want an agent to pick it up in.
 	mcpKeyForm   *components.Modal
 	mcpWorkspace string // workspace name the "m" keybind was pressed under
 	mcpProject   string // project name the "m" keybind was pressed on
