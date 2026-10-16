@@ -17,10 +17,11 @@ import (
 // hand-rolled rather than using components.Modal's "radio" field type,
 // which is declared but never actually implemented anywhere.
 type WorkspaceModal struct {
-	visible bool
-	cursor  int
-	items   []nexus.Workspace
-	current string
+	visible    bool
+	cursor     int
+	items      []nexus.Workspace
+	current    string
+	importMode bool // true when picking a push target (see ShowForImport) rather than switching
 
 	// addForm is a real components.Modal reused only for its working
 	// text-field flow, to collect name/server/project for a new
@@ -42,6 +43,7 @@ func NewWorkspaceModal() *WorkspaceModal {
 // Show displays the list, highlighting the currently-active workspace.
 func (w *WorkspaceModal) Show(items []nexus.Workspace, current string) {
 	w.visible = true
+	w.importMode = false
 	w.items = items
 	w.current = current
 	w.cursor = 0
@@ -51,6 +53,19 @@ func (w *WorkspaceModal) Show(items []nexus.Workspace, current string) {
 			break
 		}
 	}
+}
+
+// ShowForImport displays the list in "pick a push target" mode - used to
+// import a currently-selected local collection/environment into one of
+// the configured collaborative workspaces without first switching into
+// it. Local itself is never a valid target, so callers should already
+// have filtered it out of items.
+func (w *WorkspaceModal) ShowForImport(items []nexus.Workspace) {
+	w.visible = true
+	w.importMode = true
+	w.items = items
+	w.current = ""
+	w.cursor = 0
 }
 
 // Hide closes the list (and any open add-form sub-modal).
@@ -77,6 +92,7 @@ const (
 	WorkspaceModalAdd
 	WorkspaceModalRemove
 	WorkspaceModalCancel
+	WorkspaceModalImportTarget // user picked a workspace to import/push the pending resource into
 )
 
 // Update handles a keypress against the list view. selected is only
@@ -101,15 +117,24 @@ func (w *WorkspaceModal) Update(msg tea.KeyMsg) (action WorkspaceModalAction, se
 		if w.cursor >= 0 && w.cursor < len(w.items) {
 			sel := w.items[w.cursor]
 			w.Hide()
+			if w.importMode {
+				return WorkspaceModalImportTarget, sel
+			}
 			return WorkspaceModalSwitch, sel
 		}
 	case "a":
+		if w.importMode {
+			break // adding a new workspace mid-import isn't supported - use W first
+		}
 		w.visible = false // keep registry state; hand off to the add sub-form
 		w.addForm.SetFieldValue("name", "")
 		w.addForm.SetFieldValue("server", "")
 		w.addForm.SetFieldValue("project", "")
 		w.addForm.Show()
 	case "d":
+		if w.importMode {
+			break // removing a workspace mid-import isn't supported
+		}
 		if w.cursor >= 0 && w.cursor < len(w.items) {
 			sel := w.items[w.cursor]
 			if !sel.IsLocal() {
@@ -176,7 +201,11 @@ func (w *WorkspaceModal) View(screenWidth, screenHeight int) string {
 
 	var b strings.Builder
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Mauve)
-	b.WriteString(titleStyle.Render("Switch Workspace"))
+	title := "Switch Workspace"
+	if w.importMode {
+		title = "Import Into Workspace"
+	}
+	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
 
 	for i, ws := range w.items {
@@ -205,7 +234,11 @@ func (w *WorkspaceModal) View(screenWidth, screenHeight int) string {
 
 	b.WriteString("\n")
 	hintStyle := lipgloss.NewStyle().Foreground(styles.Subtext0)
-	b.WriteString(hintStyle.Render("enter:switch  a:add  d:remove  esc:cancel"))
+	hint := "enter:switch  a:add  d:remove  esc:cancel"
+	if w.importMode {
+		hint = "enter:import here  esc:cancel"
+	}
+	b.WriteString(hintStyle.Render(hint))
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

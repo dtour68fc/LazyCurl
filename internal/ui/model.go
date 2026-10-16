@@ -245,6 +245,13 @@ type Model struct {
 	nexusEvents          chan interface{}
 	nexusDisconnectModal *components.Modal
 
+	// Pending resource for an in-progress "I" import (pushing a local
+	// collection/environment into a chosen collaborative workspace
+	// without switching into it first) - set when the workspace-picker
+	// modal opens in import mode, consumed once a target is chosen.
+	pendingImportResource *nexuscurlv1.Resource
+	pendingImportLabel    string
+
 	// External editor state
 	externalEditorActive bool              // Whether external editor is currently open
 	externalEditorInfo   *api.TempFileInfo // Temp file info for cleanup
@@ -528,6 +535,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch action {
 			case WorkspaceModalSwitch:
 				return m.switchNexusWorkspace(selected.Name)
+			case WorkspaceModalImportTarget:
+				return m.completeImport(selected)
 			case WorkspaceModalRemove:
 				if err := m.nexusRegistry.Remove(selected.Name); err != nil {
 					m.statusBar.Error(err)
@@ -973,6 +982,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// automatic, per the "last write wins, pull explicitly" design).
 			if m.activePanel == CollectionsPanel && msg.String() == "U" {
 				return m.pullFromNexus()
+			}
+
+			// I imports the currently-selected collection/environment into
+			// a chosen collaborative workspace without requiring you to
+			// switch into it first (switching away normally swaps the
+			// panel contents, hiding whatever's local) - opens a picker of
+			// configured workspaces, pushes once a target is chosen, then
+			// switches into it so you can see it land.
+			if m.activePanel == CollectionsPanel && msg.String() == "I" {
+				return m.openImportWorkspacePicker()
 			}
 
 			// Direct panel jump: 1/2/3 -> Collections/Request/Response (lazygit style)

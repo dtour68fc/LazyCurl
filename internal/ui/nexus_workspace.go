@@ -216,3 +216,111 @@ func (m Model) pullFromNexus() (tea.Model, tea.Cmd) {
 
 	return m, nil
 }
+
+// openImportWorkspacePicker captures the currently-selected collection or
+// environment (whichever left-panel tab is active) as a pending resource
+// and shows the workspace list in "pick a push target" mode. Works from
+// any workspace, including local - that's the whole point: importing a
+// local resource into a collaborative one without first switching away
+// from local and losing sight of it (switching does a full panel swap).
+func (m Model) openImportWorkspacePicker() (tea.Model, tea.Cmd) {
+	var res *nexuscurlv1.Resource
+	var label string
+
+	switch m.leftPanel.GetActiveTab() {
+	case CollectionsTab:
+		selected := m.leftPanel.GetCollections().Selected()
+		if selected == nil {
+			m.statusBar.Info("Nothing selected to import")
+			return m, nil
+		}
+		coll := m.leftPanel.GetCollections().FindCollectionByNode(selected)
+		if coll == nil {
+			m.statusBar.Info("Select a collection (or something inside one) to import")
+			return m, nil
+		}
+		r, err := nexus.ResourceFromCollection(coll)
+		if err != nil {
+			m.statusBar.Error(err)
+			return m, nil
+		}
+		res, label = r, coll.Name
+
+	case EnvironmentsTab:
+		node := m.leftPanel.GetEnvironments().getCurrentNode()
+		env := m.leftPanel.GetEnvironments().getEnvForNode(node)
+		if env == nil {
+			m.statusBar.Info("Select an environment to import")
+			return m, nil
+		}
+		r, err := nexus.ResourceFromEnvironment(env)
+		if err != nil {
+			m.statusBar.Error(err)
+			return m, nil
+		}
+		res, label = r, env.Name
+
+	default:
+		return m, nil
+	}
+
+	var targets []nexus.Workspace
+	for _, w := range m.nexusRegistry.Workspaces {
+		if !w.IsLocal() {
+			targets = append(targets, w)
+		}
+	}
+	if len(targets) == 0 {
+		m.statusBar.Info("No collaborative workspaces configured yet - press W to add one")
+		return m, nil
+	}
+
+	m.pendingImportResource = res
+	m.pendingImportLabel = label
+	m.workspaceModal.ShowForImport(targets)
+	return m, nil
+}
+
+// completeImport pushes the pending resource (captured by
+// openImportWorkspacePicker) to the chosen target workspace's server,
+// then switches into that workspace so the import is immediately visible
+// (consistent with "full swap on switch" - without this the just-pushed
+// resource wouldn't show up until a manual U pull anyway).
+func (m Model) completeImport(target nexus.Workspace) (tea.Model, tea.Cmd) {
+	res := m.pendingImportResource
+	label := m.pendingImportLabel
+	m.pendingImportResource = nil
+	m.pendingImportLabel = ""
+
+	if res == nil {
+		return m, nil
+	}
+
+	client := m.nexusClient
+	isTemp := false
+	if client == nil || m.nexusRegistry.Current != target.Name {
+		c, err := nexus.Dial(target.Server)
+		if err != nil {
+			m.statusBar.Error(fmt.Errorf("connecting to %s: %w", target.Server, err))
+			return m, nil
+		}
+		client = c
+		isTemp = true
+	}
+
+	pushed, err := client.Push(context.Background(), target.Project, res)
+	if isTemp {
+		_ = client.Close()
+	}
+	if err != nil {
+		m.statusBar.Error(fmt.Errorf("importing %q into %s: %w", label, target.Name, err))
+		return m, nil
+	}
+
+	m.statusBar.Success("Import", fmt.Sprintf("%s -> %s (rev %d)", label, target.Name, pushed.GetRevision()))
+
+	// Switch into the target workspace so the import is visible right
+	// away, rather than leaving the panel showing local/whatever was
+	// active before.
+	return m.switchNexusWorkspace(target.Name)
+}
