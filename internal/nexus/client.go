@@ -69,6 +69,21 @@ func (c *Client) ListProjects(ctx context.Context) ([]string, error) {
 	return resp.GetProjects(), nil
 }
 
+// IssueAPIKey asks the server to generate a brand-new API key scoped to
+// project, activating it server-side immediately - no SetAPIKey call
+// needed afterward to use the returned value elsewhere (e.g. writing it
+// into a .mcp.json). Deliberately not gated by any existing key itself,
+// same as ListProjects - see the RPC's doc comment in the .proto.
+func (c *Client) IssueAPIKey(ctx context.Context, project, owner string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	resp, err := c.rpc.IssueAPIKey(ctx, &nexuscurlv1.IssueAPIKeyRequest{Project: project, Owner: owner})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetKey(), nil
+}
+
 // Pull fetches the current snapshot of every Resource in a project.
 func (c *Client) Pull(ctx context.Context, project string) ([]*nexuscurlv1.Resource, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)

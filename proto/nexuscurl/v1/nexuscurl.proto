@@ -80,7 +80,47 @@ message ChangeNotification {
   string updated_by = 4;
 }
 
+message ListProjectsRequest {}
+
+message ListProjectsResponse {
+  // Every project name that currently has at least one pushed Resource
+  // on this server. A brand-new project with nothing pushed yet won't
+  // show up here - there's nothing to list - so clients should still
+  // allow typing a new project name freeform alongside this list.
+  repeated string projects = 1;
+}
+
+message IssueAPIKeyRequest {
+  // Project the new key should be scoped to.
+  string project = 1;
+  // Free-form identifier for who/what the key is for (e.g. a username) -
+  // recorded alongside the key for an operator's own bookkeeping, not
+  // itself verified or used for authorization.
+  string owner = 2;
+}
+
+message IssueAPIKeyResponse {
+  // The newly generated key, in the form "ncmcp_<32 hex chars>". This is
+  // the only time the server ever returns the key value - it isn't
+  // retrievable again later, only re-issuable as a brand new key.
+  string key = 1;
+}
+
 service NexusCurlService {
+  // Names of all projects this server currently has data for, so a
+  // client adding a workspace can pick one instead of typing blind.
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+
+  // Generates a brand-new API key scoped to one project, appends it to
+  // the server's api keys file, and activates it immediately (no
+  // restart needed). Deliberately ungated like ListProjects: anyone who
+  // can already reach this server can Push/Pull that project unkeyed
+  // today (gating is opt-in), so self-service issuance doesn't lower
+  // the server's existing trust bar - it just lets a client (e.g.
+  // LazyCurl's "m" keybind) upgrade itself to keyed access without an
+  // operator running `nexuscurlserver keygen` by hand.
+  rpc IssueAPIKey(IssueAPIKeyRequest) returns (IssueAPIKeyResponse);
+
   // Full snapshot of a project's Collections + Environments.
   rpc Pull(PullRequest) returns (PullResponse);
 

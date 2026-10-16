@@ -120,10 +120,12 @@ Two ways to open the API-key prompt:
 - **Any project on a server**: press `W` to open the workspace list, `e`
   on a server to open its project checklist, then `m` on a project row.
 
-Either way, paste an API key if you have one (optional, can be
-added/updated later by pressing `m` again), or leave it blank to start
-unauthenticated. This writes/merges a `.mcp.json` entry in the current
-directory like:
+Either way, paste an API key if you already have one, or just leave it
+blank and confirm - a brand-new key gets generated and activated on the
+server for you (no operator running `nexuscurlserver keygen` required).
+Pressing `m` again later overwrites the same entry in place, e.g. to
+rotate to a freshly generated key. This writes/merges a `.mcp.json`
+entry in the current directory like:
 
 ```json
 {

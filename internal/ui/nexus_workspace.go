@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os/user"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -423,10 +424,11 @@ func (m Model) completeImport(target nexus.Workspace) (tea.Model, tea.Cmd) {
 // .mcp.json entry in the current directory for project on workspaceName's
 // server, under the "mcpServers" convention most MCP-aware CLIs/agents
 // already read for project-scoped server config. apiKey may be empty -
-// the server's API-key gating is opt-in, so an unauthenticated entry is
-// a fully valid starting point; pressing "m" again later with a real key
-// (once one's been issued via nexuscurlserver keygen) overwrites this
-// same entry in place.
+// in that case a brand-new key is self-issued from the server via
+// IssueAPIKey (activated immediately, no operator needed) rather than
+// leaving the entry unauthenticated, so pressing "m" always hands back a
+// working, keyed config. Pressing "m" again later overwrites this same
+// entry in place (e.g. to rotate to a fresh key).
 func (m Model) completeMCPSetup(workspaceName, project, apiKey string) (tea.Model, tea.Cmd) {
 	ws, ok := m.nexusRegistry.Get(workspaceName)
 	if !ok {
@@ -434,10 +436,25 @@ func (m Model) completeMCPSetup(workspaceName, project, apiKey string) (tea.Mode
 		return m, nil
 	}
 
-	args := []string{"mcp", "--server", ws.Server, "--project", project}
-	if apiKey != "" {
-		args = append(args, "--api-key", apiKey)
+	generated := false
+	if apiKey == "" {
+		client, err := nexus.Dial(ws.Server)
+		if err != nil {
+			m.statusBar.Error(fmt.Errorf("connecting to %s: %w", ws.Server, err))
+			return m, nil
+		}
+		defer client.Close()
+
+		key, err := client.IssueAPIKey(context.Background(), project, currentOwnerName())
+		if err != nil {
+			m.statusBar.Error(fmt.Errorf("issuing api key: %w", err))
+			return m, nil
+		}
+		apiKey = key
+		generated = true
 	}
+
+	args := []string{"mcp", "--server", ws.Server, "--project", project, "--api-key", apiKey}
 
 	entryName := "nexuscurl-" + project
 	if err := nexus.WriteMCPConfig(".mcp.json", entryName, nexus.MCPConfigEntry{
@@ -448,12 +465,22 @@ func (m Model) completeMCPSetup(workspaceName, project, apiKey string) (tea.Mode
 		return m, nil
 	}
 
-	if apiKey == "" {
-		m.statusBar.Success("MCP", fmt.Sprintf(".mcp.json -> %q (no API key - press m again once you have one)", entryName))
+	if generated {
+		m.statusBar.Success("MCP", fmt.Sprintf(".mcp.json -> %q (generated a new api key)", entryName))
 	} else {
 		m.statusBar.Success("MCP", fmt.Sprintf(".mcp.json -> %q", entryName))
 	}
 	return m, nil
+}
+
+// currentOwnerName returns the local OS username, used as the "owner" on
+// self-issued API keys purely for an operator's own bookkeeping in
+// apikeys.yaml - falls back to "lazycurl" if it can't be determined.
+func currentOwnerName() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return "lazycurl"
 }
 
 // linkProjectToWorkspace adds project to the named workspace's Projects

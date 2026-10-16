@@ -95,7 +95,7 @@ func NewWorkspaceModal() *WorkspaceModal {
 			{Name: "project", Label: "Project", Type: "text", Placeholder: "e.g. PMC"},
 		}),
 		mcpKeyForm: components.NewFormModal("MCP Setup", "nexus_mcp_apikey", []components.FormField{
-			{Name: "apikey", Label: "API Key (optional)", Type: "text", Placeholder: "paste key, or leave blank"},
+			{Name: "apikey", Label: "API Key (optional)", Type: "text", Placeholder: "paste a key, or leave blank to generate one"},
 		}),
 	}
 }
