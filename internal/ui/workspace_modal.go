@@ -297,7 +297,19 @@ func (w *WorkspaceModal) UpdateChecklist(msg tea.KeyMsg) (action WorkspaceModalA
 		if w.checklistCursor > 0 {
 			w.checklistCursor--
 		}
-	case " ", "enter":
+	case " ":
+		// Space toggles the checkbox under the cursor - it never applies
+		// anything, just marks a project selected/deselected. No-op on
+		// the trailing "+ New project..." row (nothing to toggle there).
+		if w.checklistCursor < len(w.checklistItems) {
+			project := w.checklistItems[w.checklistCursor]
+			w.checklistChecked[project] = !w.checklistChecked[project]
+		}
+	case "enter":
+		// Enter on "+ New project..." opens the text sub-form to add a
+		// brand-new project (checked) to the list. Enter anywhere else
+		// commits the current checked set and applies it - same action
+		// "s" used to perform; "s" is kept as an alias below.
 		if w.checklistCursor == len(w.checklistItems) {
 			w.checklistVisible = false
 			w.newProjectTarget = newProjectForChecklist
@@ -305,8 +317,7 @@ func (w *WorkspaceModal) UpdateChecklist(msg tea.KeyMsg) (action WorkspaceModalA
 			w.newProjectForm.Show()
 			return WorkspaceModalNone, nexus.Workspace{}
 		}
-		project := w.checklistItems[w.checklistCursor]
-		w.checklistChecked[project] = !w.checklistChecked[project]
+		fallthrough
 	case "s":
 		name := w.checklistWorkspace
 		final := w.checkedProjects()
@@ -518,7 +529,7 @@ func (w *WorkspaceModal) renderChecklist(screenWidth, screenHeight int) string {
 	b.WriteString("\n\n")
 
 	hintStyle := lipgloss.NewStyle().Foreground(styles.Subtext0)
-	b.WriteString(hintStyle.Render("space/enter:toggle  s:save  esc:cancel"))
+	b.WriteString(hintStyle.Render("space:toggle  enter:apply  esc:cancel"))
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
