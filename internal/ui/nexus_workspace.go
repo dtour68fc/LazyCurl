@@ -454,21 +454,30 @@ func (m Model) completeMCPSetup(workspaceName, project, apiKey string) (tea.Mode
 		generated = true
 	}
 
-	args := []string{"mcp", "--server", ws.Server, "--project", project, "--api-key", apiKey}
+	args := []string{"mcp", "--server", ws.Server, "--project", project}
 
 	entryName := "nexuscurl-" + project
-	if err := nexus.WriteMCPConfig(".mcp.json", entryName, nexus.MCPConfigEntry{
-		Command: "lazycurl",
-		Args:    args,
-	}); err != nil {
+	entry := nexus.MCPConfigEntry{Command: "lazycurl", Args: args}
+	if apiKey != "" {
+		// Passed via env, not an "--api-key" arg - argv is visible to
+		// any local user via ps/proc, which would leak a credential
+		// that can otherwise be used to pull a project's Environment
+		// variables (real secrets) through the MCP server itself.
+		entry.Env = map[string]string{"NEXUSCURL_API_KEY": apiKey}
+	}
+	if err := nexus.WriteMCPConfig(".mcp.json", entryName, entry); err != nil {
 		m.statusBar.Error(fmt.Errorf("writing .mcp.json: %w", err))
+		return m, nil
+	}
+	if err := nexus.EnsureGitignored(".", ".mcp.json"); err != nil {
+		m.statusBar.Error(fmt.Errorf("updating .gitignore: %w", err))
 		return m, nil
 	}
 
 	if generated {
-		m.statusBar.Success("MCP", fmt.Sprintf(".mcp.json -> %q (generated a new api key)", entryName))
+		m.statusBar.Success("MCP", fmt.Sprintf(".mcp.json -> %q (generated a new api key, .gitignore updated)", entryName))
 	} else {
-		m.statusBar.Success("MCP", fmt.Sprintf(".mcp.json -> %q", entryName))
+		m.statusBar.Success("MCP", fmt.Sprintf(".mcp.json -> %q (.gitignore updated)", entryName))
 	}
 	return m, nil
 }

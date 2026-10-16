@@ -3,11 +3,21 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/dtour68fc/LazyCurl/internal/mcpserver"
 	"github.com/dtour68fc/LazyCurl/internal/nexus"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
+
+// apiKeyEnvVar is read as a fallback (and preferred source) for the
+// project's API key, so it doesn't have to be passed as a literal
+// --api-key CLI argument - process argv (unlike env vars inherited by a
+// child process) is visible to any local user via `ps`/`/proc/<pid>/cmdline`,
+// which would expose a live, unattended-use-grade credential on a shared
+// host. .mcp.json generation (see nexus_workspace.go's completeMCPSetup)
+// sets this via the entry's "env" field rather than "args".
+const apiKeyEnvVar = "NEXUSCURL_API_KEY"
 
 // MCPCommand holds parsed arguments for the "mcp" subcommand, which
 // starts a stdio MCP server exposing Collection/Environment CRUD and
@@ -31,7 +41,11 @@ func ParseMCPArgs(args []string) (*MCPCommand, error) {
 		"  --project NAME      Project to operate on (required)\n" +
 		"  --api-key KEY       API key for the project (optional - if omitted,\n" +
 		"                      requests are unauthenticated, matching the\n" +
-		"                      server's opt-in gating)"
+		"                      server's opt-in gating). Prefer setting the\n" +
+		"                      NEXUSCURL_API_KEY environment variable instead -\n" +
+		"                      it isn't visible in `ps`/`/proc/<pid>/cmdline`\n" +
+		"                      like a CLI argument is, and takes priority over\n" +
+		"                      --api-key if both are set."
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -60,6 +74,14 @@ func ParseMCPArgs(args []string) (*MCPCommand, error) {
 
 	if cmd.Server == "" || cmd.Project == "" {
 		return nil, fmt.Errorf("--server and --project are required\n\n%s", usage)
+	}
+
+	// Env var takes priority over --api-key when both are set, since a
+	// .mcp.json-launched process is expected to supply it via env (not
+	// visible in `ps`) - an explicit --api-key is only expected from
+	// manual/interactive invocation.
+	if v := os.Getenv(apiKeyEnvVar); v != "" {
+		cmd.APIKey = v
 	}
 
 	return cmd, nil

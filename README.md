@@ -103,12 +103,19 @@ AI coding agents create/list/update a NexusCurlServer project's Collections
 tools for migrating large Postman exports or mass-creating gRPC requests:
 
 ```bash
-lazycurl mcp --server 10.10.1.107:29500 --project PMC --api-key ncmcp_xxxx...
+NEXUSCURL_API_KEY=ncmcp_xxxx... lazycurl mcp --server 10.10.1.107:29500 --project PMC
 ```
 
-`--api-key` is optional - if omitted, requests go out unauthenticated,
-matching NexusCurlServer's opt-in key gating (see its README for issuing
-keys with `nexuscurlserver keygen`).
+The key is best supplied via the `NEXUSCURL_API_KEY` environment
+variable (shown above) rather than `--api-key KEY`/`--api-key` is still
+accepted for convenience, but a CLI argument is visible to any other
+local user via `ps`/`/proc/<pid>/cmdline` for as long as the process
+runs - a real exposure given a leaked key can be used to pull a
+project's Environment variables (real secrets) through this same MCP
+server. The env var takes priority if both are set. Omitting both is
+also valid - requests then go out unauthenticated, matching
+NexusCurlServer's opt-in key gating (see its README for issuing keys
+with `nexuscurlserver keygen`).
 
 ### Setting it up from the TUI
 
@@ -125,14 +132,18 @@ blank and confirm - a brand-new key gets generated and activated on the
 server for you (no operator running `nexuscurlserver keygen` required).
 Pressing `m` again later overwrites the same entry in place, e.g. to
 rotate to a freshly generated key. This writes/merges a `.mcp.json`
-entry in the current directory like:
+entry in the current directory (0600 permissions - it holds a live
+credential) and adds a `.mcp.json` line to this directory's
+`.gitignore` (creating it if needed) so the key doesn't end up
+committed by habit:
 
 ```json
 {
   "mcpServers": {
     "nexuscurl-PMC": {
       "command": "lazycurl",
-      "args": ["mcp", "--server", "10.10.1.107:29500", "--project", "PMC", "--api-key", "ncmcp_xxxx..."]
+      "args": ["mcp", "--server", "10.10.1.107:29500", "--project", "PMC"],
+      "env": { "NEXUSCURL_API_KEY": "ncmcp_xxxx..." }
     }
   }
 }
@@ -156,7 +167,8 @@ Example MCP client config (VS Code `mcp.json`):
     "lazycurl-nexuscurl": {
       "type": "stdio",
       "command": "lazycurl",
-      "args": ["mcp", "--server", "10.10.1.107:29500", "--project", "PMC", "--api-key", "ncmcp_xxxx..."]
+      "args": ["mcp", "--server", "10.10.1.107:29500", "--project", "PMC"],
+      "env": { "NEXUSCURL_API_KEY": "ncmcp_xxxx..." }
     }
   }
 }
