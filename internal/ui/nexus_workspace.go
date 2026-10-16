@@ -187,34 +187,22 @@ func (m Model) reloadNexusPanels() {
 	m.leftPanel.GetEnvironments().ReloadEnvironments()
 }
 
-// workspaceProjectPredicate computes the project-filter predicate for ws,
-// given the full registry (needed for the local workspace's "unclaimed"
-// case, which has to know every other workspace's selected projects).
-// Shared by both startup (before a Model exists to call a method on) and
-// applyWorkspaceFilter, so the two can't drift out of sync.
+// workspaceProjectPredicate computes the project-filter predicate for ws.
+// A non-local workspace only shows collections/environments tagged with
+// one of its selected projects. The local workspace means "everything on
+// this machine" - no filter at all, including anything pulled in from a
+// server - so it returns nil. Shared by both startup (before a Model
+// exists to call a method on) and applyWorkspaceFilter, so the two can't
+// drift out of sync.
 func workspaceProjectPredicate(reg *nexus.Registry, ws nexus.Workspace) func(project string) bool {
-	if !ws.IsLocal() {
-		selected := make(map[string]bool, len(ws.Projects))
-		for _, p := range ws.Projects {
-			selected[p] = true
-		}
-		return func(project string) bool { return selected[project] }
+	if ws.IsLocal() {
+		return nil
 	}
-
-	// Local: show only "unclaimed" collections/environments - those not
-	// tagged with a project any configured workspace currently has
-	// selected. An empty Project is never claimed, so it's naturally
-	// included here too.
-	claimed := make(map[string]bool)
-	for _, w := range reg.Workspaces {
-		if w.IsLocal() {
-			continue
-		}
-		for _, p := range w.Projects {
-			claimed[p] = true
-		}
+	selected := make(map[string]bool, len(ws.Projects))
+	for _, p := range ws.Projects {
+		selected[p] = true
 	}
-	return func(project string) bool { return !claimed[project] }
+	return func(project string) bool { return selected[project] }
 }
 
 // applyWorkspaceFilter installs the project filter for ws on both the
