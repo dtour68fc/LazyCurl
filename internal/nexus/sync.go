@@ -102,6 +102,85 @@ func WriteResourcesToCache(cacheDir string, resources []*nexuscurlv1.Resource) e
 	return nil
 }
 
+// ImportResourcesToGlobal writes each given resource into the normal
+// global collections/environments directories, like WriteResourcesToCache
+// does for a workspace cache dir - except it does NOT wipe the
+// directories first, so it merges into whatever's already there (other
+// local collections/environments, or previously-imported ones from other
+// projects) rather than replacing it wholesale. Returns how many
+// resources were written.
+func ImportResourcesToGlobal(collectionsDir, environmentsDir string, resources []*nexuscurlv1.Resource) (int, error) {
+	for _, dir := range []string{collectionsDir, environmentsDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return 0, fmt.Errorf("creating dir %q: %w", dir, err)
+		}
+	}
+
+	imported := 0
+	for _, r := range resources {
+		var dir string
+		switch r.GetType() {
+		case ResourceTypeCollection:
+			dir = collectionsDir
+		case ResourceTypeEnvironment:
+			dir = environmentsDir
+		default:
+			continue // unknown resource type - ignore rather than fail the whole import
+		}
+		path := filepath.Join(dir, filenameFor(r.GetName())+".json")
+		if err := os.WriteFile(path, r.GetContent(), 0o644); err != nil {
+			return imported, fmt.Errorf("writing %q: %w", path, err)
+		}
+		imported++
+	}
+	return imported, nil
+}
+
+// RemoveProjectResources deletes every local collection/environment file
+// in the given directories whose Project field matches project - used
+// when the user deselects a project from a workspace's checklist.
+//
+// Known tradeoff: this also removes any local-only collection/
+// environment that happens to share that exact Project tag, even if it
+// was never imported from that workspace. That's consistent with the
+// rest of this app's design, where Project is a single shared grouping
+// key used by both the local-only environment-auto-switch feature and
+// NexusCurl import/export - there's no separate "this came from workspace
+// X" provenance tag to distinguish the two cases.
+func RemoveProjectResources(collectionsDir, environmentsDir, project string) (int, error) {
+	removed := 0
+
+	collections, err := api.LoadAllCollections(collectionsDir)
+	if err != nil {
+		return removed, fmt.Errorf("loading collections from %q: %w", collectionsDir, err)
+	}
+	for _, c := range collections {
+		if c.Project != project {
+			continue
+		}
+		if err := os.Remove(c.FilePath); err != nil && !os.IsNotExist(err) {
+			return removed, fmt.Errorf("removing %q: %w", c.FilePath, err)
+		}
+		removed++
+	}
+
+	environments, err := api.LoadAllEnvironments(environmentsDir)
+	if err != nil {
+		return removed, fmt.Errorf("loading environments from %q: %w", environmentsDir, err)
+	}
+	for _, e := range environments {
+		if e.Project != project {
+			continue
+		}
+		if err := os.Remove(e.FilePath); err != nil && !os.IsNotExist(err) {
+			return removed, fmt.Errorf("removing %q: %w", e.FilePath, err)
+		}
+		removed++
+	}
+
+	return removed, nil
+}
+
 // CacheCollectionsDir and CacheEnvironmentsDir are the subdirectories
 // WriteResourcesToCache uses - exported so the UI layer can point
 // CollectionsView/EnvironmentsView at them directly.

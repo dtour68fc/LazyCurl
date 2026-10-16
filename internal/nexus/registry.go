@@ -1,8 +1,8 @@
 // Package nexus is LazyCurl's client for NexusCurlServer: the workspace
-// registry (which collaborative servers are configured, which one is
-// active), the gRPC client wrapper (Pull/Push/Subscribe), and the
-// translation between on-disk Collections/Environments and the wire
-// Resource shape.
+// registry (which collaborative servers are configured, and which
+// projects on each one are currently imported), the gRPC client wrapper
+// (Pull/Push/ListProjects), and the translation between on-disk
+// Collections/Environments and the wire Resource shape.
 package nexus
 
 import (
@@ -19,15 +19,21 @@ import (
 // involved at all. Every registry has exactly one entry with this name.
 const LocalWorkspaceName = "local"
 
-// Workspace is one configured destination: either the special "local"
-// entry, or a collaborative one pointing at a NexusCurlServer.
+// Workspace is one configured server connection: either the special
+// "local" entry, or a collaborative one pointing at a NexusCurlServer.
+// A collaborative workspace has no single fixed project - Projects is
+// the set of that server's projects currently "selected", meaning their
+// Collections/Environments have been imported as normal local files
+// (tagged with api.CollectionFile.Project/api.EnvironmentFile.Project
+// set to the project name) and kept importable/removable over time.
 type Workspace struct {
 	Name string `yaml:"name"`
 	// Server is "host:port" - empty for the local workspace.
 	Server string `yaml:"server,omitempty"`
-	// Project scopes which Collections/Environments this workspace syncs
-	// on that server - a single server can host more than one project.
-	Project string `yaml:"project,omitempty"`
+	// Projects is the set of this server's projects currently imported
+	// into the global Collections/Environments directories. Unused for
+	// the local workspace.
+	Projects []string `yaml:"projects,omitempty"`
 }
 
 // IsLocal reports whether this is the local (non-synced) workspace.
@@ -35,15 +41,14 @@ func (w Workspace) IsLocal() bool {
 	return w.Name == LocalWorkspaceName
 }
 
-// Registry is the full set of configured workspaces plus which one is
-// currently active - persisted at config.GetNexusWorkspacesPath().
+// Registry is the full set of configured workspaces - persisted at
+// config.GetNexusWorkspacesPath().
 type Registry struct {
-	Current    string      `yaml:"current"`
 	Workspaces []Workspace `yaml:"workspaces"`
 }
 
 // Load reads the registry from disk, creating a fresh one (just the
-// local workspace, active) if nothing's been saved yet.
+// local workspace) if nothing's been saved yet.
 func Load() (*Registry, error) {
 	path := config.GetNexusWorkspacesPath()
 	data, err := os.ReadFile(path)
@@ -64,31 +69,19 @@ func Load() (*Registry, error) {
 
 func defaultRegistry() *Registry {
 	return &Registry{
-		Current:    LocalWorkspaceName,
 		Workspaces: []Workspace{{Name: LocalWorkspaceName}},
 	}
 }
 
 // ensureLocal guarantees the local workspace exists (as the first entry)
-// even if a hand-edited or corrupted file is missing it, and that
-// Current always names something that actually exists.
+// even if a hand-edited or corrupted file is missing it.
 func (r *Registry) ensureLocal() {
-	hasLocal := false
 	for _, w := range r.Workspaces {
 		if w.IsLocal() {
-			hasLocal = true
-			break
+			return
 		}
 	}
-	if !hasLocal {
-		r.Workspaces = append([]Workspace{{Name: LocalWorkspaceName}}, r.Workspaces...)
-	}
-	if r.Current == "" {
-		r.Current = LocalWorkspaceName
-	}
-	if _, ok := r.Get(r.Current); !ok {
-		r.Current = LocalWorkspaceName
-	}
+	r.Workspaces = append([]Workspace{{Name: LocalWorkspaceName}}, r.Workspaces...)
 }
 
 // Save persists the registry to disk.
@@ -117,18 +110,10 @@ func (r *Registry) Get(name string) (Workspace, bool) {
 	return Workspace{}, false
 }
 
-// CurrentWorkspace returns the active workspace (falling back to local
-// if Current somehow names something that no longer exists).
-func (r *Registry) CurrentWorkspace() Workspace {
-	if w, ok := r.Get(r.Current); ok {
-		return w
-	}
-	return Workspace{Name: LocalWorkspaceName}
-}
-
-// Add registers a new collaborative workspace. Returns an error if the
-// name is already taken (including "local", which is reserved) or if
-// server/project are blank.
+// Add registers a new collaborative workspace - just name+server;
+// project selection happens afterward via SetProjects. Returns an error
+// if the name is already taken (including "local", which is reserved) or
+// if the name/server are blank.
 func (r *Registry) Add(w Workspace) error {
 	if w.Name == "" {
 		return fmt.Errorf("workspace name is required")
@@ -139,9 +124,6 @@ func (r *Registry) Add(w Workspace) error {
 	if w.Server == "" {
 		return fmt.Errorf("server address is required")
 	}
-	if w.Project == "" {
-		return fmt.Errorf("project name is required")
-	}
 	if _, exists := r.Get(w.Name); exists {
 		return fmt.Errorf("a workspace named %q already exists", w.Name)
 	}
@@ -149,9 +131,48 @@ func (r *Registry) Add(w Workspace) error {
 	return nil
 }
 
+// SetProjects replaces the full set of selected/imported projects for a
+// configured workspace. The local workspace has no projects and can't be
+// edited this way.
+func (r *Registry) SetProjects(name string, projects []string) error {
+	for i, w := range r.Workspaces {
+		if w.Name == name {
+			if w.IsLocal() {
+				return fmt.Errorf("%q has no projects to change", LocalWorkspaceName)
+			}
+			r.Workspaces[i].Projects = projects
+			return nil
+		}
+	}
+	return fmt.Errorf("no workspace named %q", name)
+}
+
+// FindProjectWorkspace returns the first non-local workspace whose
+// Projects includes the given project name - used to resolve which
+// server a local collection/environment's Project tag maps to, for
+// push/pull without the user having to pick a workspace every time.
+func (r *Registry) FindProjectWorkspace(project string) (Workspace, bool) {
+	if project == "" {
+		return Workspace{}, false
+	}
+	for _, w := range r.Workspaces {
+		if w.IsLocal() {
+			continue
+		}
+		for _, p := range w.Projects {
+			if p == project {
+				return w, true
+			}
+		}
+	}
+	return Workspace{}, false
+}
+
 // Remove deletes a configured workspace. The local workspace can never
-// be removed. If the removed workspace was current, Current reverts to
-// local.
+// be removed. Note this only forgets the server connection - it does not
+// remove any already-imported local collections/environments tagged with
+// that server's projects; use RemoveProjectResources first if that
+// cleanup is wanted.
 func (r *Registry) Remove(name string) error {
 	if name == LocalWorkspaceName {
 		return fmt.Errorf("the local workspace can't be deleted")
@@ -167,18 +188,5 @@ func (r *Registry) Remove(name string) error {
 		return fmt.Errorf("no workspace named %q", name)
 	}
 	r.Workspaces = append(r.Workspaces[:idx], r.Workspaces[idx+1:]...)
-	if r.Current == name {
-		r.Current = LocalWorkspaceName
-	}
-	return nil
-}
-
-// SetCurrent switches the active workspace. Returns an error if name
-// isn't configured.
-func (r *Registry) SetCurrent(name string) error {
-	if _, ok := r.Get(name); !ok {
-		return fmt.Errorf("no workspace named %q", name)
-	}
-	r.Current = name
 	return nil
 }
