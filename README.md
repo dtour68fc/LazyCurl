@@ -112,11 +112,18 @@ keys with `nexuscurlserver keygen`).
 
 ### Setting it up from the TUI
 
-Press `W` to open the workspace list, `e` on a server to open its project
-checklist, then `m` on a project row to generate a `.mcp.json` entry for
-it in the current directory - paste an API key if you have one (optional,
-can be added/updated later by pressing `m` again), or leave it blank to
-start unauthenticated. This writes/merges a `.mcp.json` like:
+Two ways to open the API-key prompt:
+
+- **Already-linked collection/environment**: select it in the
+  Collections/Environments panel and press `m` directly - resolves its
+  linked project automatically.
+- **Any project on a server**: press `W` to open the workspace list, `e`
+  on a server to open its project checklist, then `m` on a project row.
+
+Either way, paste an API key if you have one (optional, can be
+added/updated later by pressing `m` again), or leave it blank to start
+unauthenticated. This writes/merges a `.mcp.json` entry in the current
+directory like:
 
 ```json
 {

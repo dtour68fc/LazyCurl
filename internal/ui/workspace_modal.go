@@ -63,13 +63,18 @@ type WorkspaceModal struct {
 	newProjectForm *components.Modal
 
 	// mcpKeyForm prompts for an (optional) API key when "m" is pressed
-	// on a checklist project row - see UpdateMCPForm. Empty is a valid
-	// answer (the server's API-key gating is opt-in). .mcp.json is
-	// written to the current working directory - launch lazycurl from
-	// the project repo you want an agent to pick it up in.
+	// on a checklist project row (or directly on an already-linked
+	// collection/environment - see ShowMCPForm) - see UpdateMCPForm.
+	// Empty is a valid answer (the server's API-key gating is opt-in).
+	// .mcp.json is written to the current working directory - launch
+	// lazycurl from the project repo you want an agent to pick it up in.
 	mcpKeyForm   *components.Modal
 	mcpWorkspace string // workspace name the "m" keybind was pressed under
 	mcpProject   string // project name the "m" keybind was pressed on
+	// mcpFromChecklist is true when mcpKeyForm was opened from the
+	// project checklist (so cancelling should return to it) and false
+	// when opened directly via ShowMCPForm (so cancelling just closes).
+	mcpFromChecklist bool
 
 	// importProjectName is the project name ShowForImport was given -
 	// always the source collection/environment's own Name, so project
@@ -337,6 +342,7 @@ func (w *WorkspaceModal) UpdateChecklist(msg tea.KeyMsg) (action WorkspaceModalA
 			w.checklistVisible = false
 			w.mcpWorkspace = w.checklistWorkspace
 			w.mcpProject = w.checklistItems[w.checklistCursor]
+			w.mcpFromChecklist = true
 			w.mcpKeyForm.SetFieldValue("apikey", "")
 			w.mcpKeyForm.Show()
 			return WorkspaceModalNone, nexus.Workspace{}
@@ -426,6 +432,18 @@ func (w *WorkspaceModal) IsMCPFormVisible() bool {
 	return w.mcpKeyForm.IsVisible()
 }
 
+// ShowMCPForm opens the API-key prompt directly for an already-known
+// workspace+project pair, without requiring the project checklist to be
+// open first - used by the Collections/Environments panel's own "m"
+// keybind on a resource that's already linked to a project.
+func (w *WorkspaceModal) ShowMCPForm(workspaceName, project string) {
+	w.mcpWorkspace = workspaceName
+	w.mcpProject = project
+	w.mcpFromChecklist = false
+	w.mcpKeyForm.SetFieldValue("apikey", "")
+	w.mcpKeyForm.Show()
+}
+
 // UpdateMCPForm forwards a key to the API-key prompt. On confirm,
 // returns WorkspaceModalMCPSetup with the workspace name (result.Name)
 // and project (result.Projects[0]) the keybind was pressed on, plus the
@@ -443,7 +461,9 @@ func (w *WorkspaceModal) UpdateMCPForm(msg tea.KeyMsg) (action WorkspaceModalAct
 		return WorkspaceModalNone, nexus.Workspace{}, ""
 	}
 	if !closeMsg.Result.Confirmed {
-		w.checklistVisible = true
+		if w.mcpFromChecklist {
+			w.checklistVisible = true
+		}
 		return WorkspaceModalNone, nexus.Workspace{}, ""
 	}
 	key, _ := closeMsg.Result.Values["apikey"].(string)

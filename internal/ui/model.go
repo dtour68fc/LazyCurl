@@ -944,6 +944,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openImportWorkspacePicker()
 			}
 
+			// m writes/updates a .mcp.json entry for the currently-selected
+			// collection/environment's already-linked project - a shortcut
+			// for the same "m" keybind on the workspace project checklist,
+			// without detouring through W -> e first. No-op (with a status
+			// message) if the resource isn't linked to a project yet.
+			if m.activePanel == CollectionsPanel && msg.String() == "m" {
+				return m.mcpSetupForSelected()
+			}
+
 			// Direct panel jump: 1/2/3 -> Collections/Request/Response (lazygit style)
 			if m.matchKey(msg.String(), m.globalConfig.KeyBindings.FocusCollections) {
 				m.activePanel = CollectionsPanel

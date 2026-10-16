@@ -241,6 +241,59 @@ func (m Model) beginLinkFlow(res *nexuscurlv1.Resource, label string, isPull boo
 	return m, nil
 }
 
+// mcpSetupForSelected opens the "set up MCP connection" API-key prompt
+// directly for whichever collection/environment is currently
+// selected/focused, resolved to its already-linked project and
+// workspace - the "m" command, for writing .mcp.json without detouring
+// through the full workspace list + project checklist. Requires the
+// resource to already be linked to a project (press "I" first if it
+// isn't, or "m" from the workspace project checklist to link+set up in
+// one step).
+func (m Model) mcpSetupForSelected() (tea.Model, tea.Cmd) {
+	var project, label string
+
+	switch m.leftPanel.GetActiveTab() {
+	case CollectionsTab:
+		selected := m.leftPanel.GetCollections().Selected()
+		if selected == nil {
+			m.statusBar.Info("Nothing selected")
+			return m, nil
+		}
+		coll := m.leftPanel.GetCollections().FindCollectionByNode(selected)
+		if coll == nil {
+			m.statusBar.Info("Select a collection (or something inside one)")
+			return m, nil
+		}
+		project, label = coll.Project, coll.Name
+
+	case EnvironmentsTab:
+		node := m.leftPanel.GetEnvironments().getCurrentNode()
+		env := m.leftPanel.GetEnvironments().getEnvForNode(node)
+		if env == nil {
+			m.statusBar.Info("Select an environment")
+			return m, nil
+		}
+		project, label = env.Project, env.Name
+
+	default:
+		return m, nil
+	}
+
+	if project == "" {
+		m.statusBar.Info(fmt.Sprintf("%q isn't linked to a project yet - press I to link it first", label))
+		return m, nil
+	}
+
+	ws, ok := m.nexusRegistry.FindProjectWorkspace(project)
+	if !ok {
+		m.statusBar.Info(fmt.Sprintf("No workspace currently has %q selected - press I to link it", project))
+		return m, nil
+	}
+
+	m.workspaceModal.ShowMCPForm(ws.Name, project)
+	return m, nil
+}
+
 // openImportWorkspacePicker captures the currently-selected collection or
 // environment (whichever left-panel tab is active) and opens the
 // workspace+project link flow for it unconditionally - the explicit "I"
