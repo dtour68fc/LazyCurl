@@ -2,20 +2,25 @@ package nexus
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"time"
 
 	nexuscurlv1 "github.com/dtour68fc/LazyCurl/internal/nexus/pb/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 )
 
 // Client is a thin wrapper around the generated gRPC client for one
-// NexusCurlServer connection - no TLS yet (matching the server's current
-// state), that's planned as a later pass on both sides. API key auth is
-// opt-in via SetAPIKey: callers (like the TUI) that never call it keep
-// talking to the server exactly as before.
+// NexusCurlServer connection. Dial connects over TLS but with
+// InsecureSkipVerify - this is confidentiality-only encryption (keeps
+// API keys and Environment variable contents off the wire in
+// cleartext), not full server-identity verification, matching
+// NexusCurlServer's self-signed-cert-with-no-CA setup; see
+// internal/tlsutil in that repo for the tradeoff rationale. API key
+// auth is opt-in via SetAPIKey: callers (like the TUI) that never call
+// it keep talking to the server exactly as before.
 type Client struct {
 	conn   *grpc.ClientConn
 	rpc    nexuscurlv1.NexusCurlServiceClient
@@ -39,11 +44,15 @@ func (c *Client) withAPIKey(ctx context.Context) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, "x-api-key", c.apiKey)
 }
 
-// Dial connects to a NexusCurlServer at "host:port". Uses grpc.NewClient
-// (lazy dial, same as the ad-hoc gRPC request feature) so this returns
-// immediately - actual connectivity problems surface on the first RPC.
+// Dial connects to a NexusCurlServer at "host:port" over TLS (see the
+// Client doc comment for why InsecureSkipVerify is used instead of
+// verifying a CA chain). Uses grpc.NewClient (lazy dial, same as the
+// ad-hoc gRPC request feature) so this returns immediately - actual
+// connectivity problems (including a plaintext-only server on the other
+// end rejecting the TLS handshake) surface on the first RPC.
 func Dial(server string) (*Client, error) {
-	conn, err := grpc.NewClient(server, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	creds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
+	conn, err := grpc.NewClient(server, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, fmt.Errorf("dial %q: %w", server, err)
 	}

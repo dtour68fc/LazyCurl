@@ -66,3 +66,10 @@ documenter.md
 
 # Coverage reports
 coverage.html
+
+# Never commit TLS/API key material - a sibling NexusCurlServer test
+# harness builds and runs the real server binary against a temp data
+# dir, but belt-and-suspenders in case a future test (or manual run)
+# ever defaults into a path under this repo instead.
+*.pem
+internal/mcpserver/data/
