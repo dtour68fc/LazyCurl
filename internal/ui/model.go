@@ -15,6 +15,8 @@ import (
 
 	"github.com/dtour68fc/LazyCurl/internal/api"
 	"github.com/dtour68fc/LazyCurl/internal/config"
+	"github.com/dtour68fc/LazyCurl/internal/nexus"
+	nexuscurlv1 "github.com/dtour68fc/LazyCurl/internal/nexus/pb/v1"
 	"github.com/dtour68fc/LazyCurl/internal/session"
 	"github.com/dtour68fc/LazyCurl/internal/ui/components"
 	"github.com/dtour68fc/LazyCurl/pkg/styles"
@@ -234,6 +236,15 @@ type Model struct {
 	// collection node to assign a project onto yet)
 	newProjectModal *components.Modal
 
+	// NexusCurl collaborative workspaces (W: switch, u: push, U: pull)
+	workspaceModal       *WorkspaceModal
+	nexusRegistry        *nexus.Registry
+	nexusClient          *nexus.Client
+	nexusCancelWatch     func()
+	nexusPending         bool // true when a Subscribe notification arrived and hasn't been pulled yet
+	nexusEvents          chan interface{}
+	nexusDisconnectModal *components.Modal
+
 	// External editor state
 	externalEditorActive bool              // Whether external editor is currently open
 	externalEditorInfo   *api.TempFileInfo // Temp file info for cleanup
@@ -305,6 +316,61 @@ func NewModel(globalConfig *config.GlobalConfig, workspaceConfig *config.Workspa
 	// collections save to (global scope by default).
 	collectionsDir := leftPanel.GetCollections().GetCollectionsPath()
 
+	// NexusCurl workspace registry - defaults to just "local" if nothing's
+	// configured yet. Startup never blocks on reconnecting a collaborative
+	// workspace; that's deferred to Init()/the first Update tick.
+	nexusReg, err := nexus.Load()
+	if err != nil {
+		nexusReg = &nexus.Registry{Current: nexus.LocalWorkspaceName, Workspaces: []nexus.Workspace{{Name: nexus.LocalWorkspaceName}}}
+	}
+	statusBar.SetWorkspace(nexusReg.Current)
+
+	// If we last left off in a collaborative workspace, point the panels
+	// at its cache dir immediately so the UI is consistent with the
+	// status bar badge - no network call here, Init()/U handles an
+	// actual reconnect+pull.
+	var nexusClient *nexus.Client
+	var nexusCancelWatch func()
+	var nexusEvents chan interface{}
+	if cur := nexusReg.CurrentWorkspace(); !cur.IsLocal() {
+		cacheDir := config.GetNexusCacheDir(cur.Name)
+		leftPanel.GetCollections().SetCollectionsPath(nexus.CacheCollectionsDir(cacheDir))
+		leftPanel.GetEnvironments().SetEnvironmentsPath(nexus.CacheEnvironmentsDir(cacheDir))
+
+		// Dial is lazy (doesn't actually connect yet), so this is safe to
+		// do unconditionally at startup without risking a hang - it just
+		// means U/u work immediately without the user having to re-open
+		// the workspace switcher after a restart.
+		if client, dialErr := nexus.Dial(cur.Server); dialErr == nil {
+			nexusClient = client
+			events := make(chan interface{}, 8)
+			nexusEvents = events
+			project := cur.Project
+			nexusCancelWatch = nexus.WatchWithReconnect(client, project,
+				func(notif *nexuscurlv1.ChangeNotification) {
+					select {
+					case events <- nexusNotifyMsg{}:
+					default:
+					}
+				},
+				func(watchErr error) {
+					select {
+					case events <- nexusGiveUpMsg{err: watchErr}:
+					default:
+					}
+				},
+			)
+		}
+	}
+
+	disconnectModal := components.NewConfirmModal(
+		"Workspace Disconnected",
+		"Lost connection to the collaborative workspace. Reverted to local.",
+		"nexus_disconnect",
+	)
+	disconnectModal.ConfirmText = "OK"
+	disconnectModal.CancelText = "OK"
+
 	return Model{
 		globalConfig:       globalConfig,
 		workspaceConfig:    workspaceConfig,
@@ -337,6 +403,12 @@ func NewModel(globalConfig *config.GlobalConfig, workspaceConfig *config.Workspa
 			{Name: "project", Label: "Project", Type: "text", Placeholder: "e.g. PMC, PMV"},
 			{Name: "name", Label: "Collection Name", Type: "text", Placeholder: "e.g. PMC (API)"},
 		}),
+		workspaceModal:       NewWorkspaceModal(),
+		nexusRegistry:        nexusReg,
+		nexusDisconnectModal: disconnectModal,
+		nexusClient:          nexusClient,
+		nexusCancelWatch:     nexusCancelWatch,
+		nexusEvents:          nexusEvents,
 	}
 }
 
@@ -344,7 +416,9 @@ func NewModel(globalConfig *config.GlobalConfig, workspaceConfig *config.Workspa
 func (m Model) Init() tea.Cmd {
 	// Initialize clipboard (ignore error - clipboard may not be available on all systems)
 	_ = clipboard.Init()
-	return nil
+	// If we started up already in a collaborative workspace, start
+	// listening for Subscribe notifications right away.
+	return m.waitForNexusEvent()
 }
 
 // Update handles messages and updates the model
@@ -429,7 +503,74 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Handle environment modal input first if visible
+	// Handle workspace-switcher modal input if visible (W)
+	if m.workspaceModal.IsVisible() {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if m.workspaceModal.IsAddFormVisible() {
+				action, added, _ := m.workspaceModal.UpdateAddForm(keyMsg)
+				switch action {
+				case WorkspaceModalAdd:
+					if err := m.nexusRegistry.Add(added); err != nil {
+						m.statusBar.Error(err)
+					} else if err := m.nexusRegistry.Save(); err != nil {
+						m.statusBar.Error(err)
+					} else {
+						m.statusBar.Success("Workspace", "added "+added.Name)
+					}
+					m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+				case WorkspaceModalCancel:
+					m.workspaceModal.ReturnToList(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+				}
+				return m, nil
+			}
+
+			action, selected := m.workspaceModal.Update(keyMsg)
+			switch action {
+			case WorkspaceModalSwitch:
+				return m.switchNexusWorkspace(selected.Name)
+			case WorkspaceModalRemove:
+				if err := m.nexusRegistry.Remove(selected.Name); err != nil {
+					m.statusBar.Error(err)
+				} else if err := m.nexusRegistry.Save(); err != nil {
+					m.statusBar.Error(err)
+				} else {
+					m.statusBar.Success("Workspace", "removed "+selected.Name)
+				}
+				m.workspaceModal.Show(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+			}
+		}
+		return m, nil
+	}
+
+	// Handle NexusCurl disconnect-notice modal input if visible (shown
+	// when WatchWithReconnect gives up and we've auto-reverted to local)
+	if m.nexusDisconnectModal.IsVisible() {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			var cmd tea.Cmd
+			m.nexusDisconnectModal, cmd = m.nexusDisconnectModal.Update(keyMsg)
+			if cmd != nil {
+				if _, ok := cmd().(components.ModalCloseMsg); ok {
+					m.nexusDisconnectModal.Hide()
+				}
+			}
+		}
+		return m, nil
+	}
+
+	// NexusCurl background events: Subscribe notifications (pending-pull
+	// badge) and reconnect give-up (auto-revert-to-local + modal).
+	switch msg.(type) {
+	case nexusNotifyMsg:
+		m.nexusPending = true
+		m.statusBar.Info("Upstream changes available - press U to pull")
+		return m, m.waitForNexusEvent()
+	case nexusGiveUpMsg:
+		newModel, _ := m.switchNexusWorkspace(nexus.LocalWorkspaceName)
+		mm := newModel.(Model)
+		mm.nexusDisconnectModal.Show()
+		return mm, nil
+	}
+
 	if m.leftPanel.GetEnvironments().HasActiveModal() {
 		var cmd tea.Cmd
 		*m.leftPanel.GetEnvironments(), cmd = m.leftPanel.GetEnvironments().Update(msg, m.globalConfig)
@@ -808,6 +949,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.newProjectModal.SetFieldValue("name", "")
 				m.newProjectModal.Show()
 				return m, nil
+			}
+
+			// W opens the NexusCurl workspace switcher (local vs configured
+			// collaborative workspaces). Scoped to the Collections panel to
+			// avoid colliding with any future per-panel use of W elsewhere.
+			if m.activePanel == CollectionsPanel && msg.String() == "W" {
+				m.workspaceModal.Show(m.nexusRegistry.Workspaces, m.nexusRegistry.Current)
+				return m, nil
+			}
+
+			// u pushes the currently-selected collection or environment
+			// upstream to the active collaborative workspace's server.
+			// No-op (with a status message) on the local workspace, since
+			// there's nothing to push to.
+			if m.activePanel == CollectionsPanel && msg.String() == "u" {
+				return m.pushSelectedToNexus()
+			}
+
+			// U pulls the latest snapshot from the active collaborative
+			// workspace's server, fully replacing the Collections/
+			// Environments panels with what's upstream (manual - never
+			// automatic, per the "last write wins, pull explicitly" design).
+			if m.activePanel == CollectionsPanel && msg.String() == "U" {
+				return m.pullFromNexus()
 			}
 
 			// Direct panel jump: 1/2/3 -> Collections/Request/Response (lazygit style)
@@ -2025,6 +2190,18 @@ func (m Model) View() string {
 	if m.newProjectModal.IsVisible() {
 		newProjView := m.newProjectModal.View(m.width, m.height)
 		result = m.overlayDialog(result, newProjView)
+	}
+
+	// Overlay workspace-switcher modal if visible
+	if m.workspaceModal.IsVisible() {
+		wsView := m.workspaceModal.View(m.width, m.height)
+		result = m.overlayDialog(result, wsView)
+	}
+
+	// Overlay NexusCurl disconnect-notice modal if visible
+	if m.nexusDisconnectModal.IsVisible() {
+		discView := m.nexusDisconnectModal.View(m.width, m.height)
+		result = m.overlayDialog(result, discView)
 	}
 
 	return result

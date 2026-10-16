@@ -100,7 +100,7 @@ type EnvironmentsView struct {
 	editModal   *components.Modal
 	renameModal *components.Modal
 	caCertModal *components.Modal // Sets an EnvNode's custom CA cert path (T)
-	pendingNode *EnvTreeNode // Node being acted upon
+	pendingNode *EnvTreeNode      // Node being acted upon
 }
 
 // NewEnvironmentsView creates a new environments view
@@ -495,7 +495,6 @@ func (e *EnvironmentsView) CreateEnvironment(name, description, project string) 
 	e.refresh()
 	return newEnv
 }
-
 
 // hasActiveModal returns true if any modal is visible
 func (e *EnvironmentsView) hasActiveModal() bool {
@@ -1658,4 +1657,23 @@ func (e *EnvironmentsView) GetBreadcrumb() []string {
 // ReloadEnvironments reloads environments from disk
 func (e *EnvironmentsView) ReloadEnvironments() {
 	e.loadEnvironments()
+}
+
+// GetEnvironmentsPath returns the directory environments are currently
+// loaded from/saved to.
+func (e *EnvironmentsView) GetEnvironmentsPath() string {
+	return e.environmentsPath
+}
+
+// GetEnvironments returns the loaded environments.
+func (e *EnvironmentsView) GetEnvironments() []*api.EnvironmentFile {
+	return e.environments
+}
+
+// SetEnvironmentsPath redirects where environments are loaded from/saved
+// to (and reloads immediately) - the environments-panel half of the
+// NexusCurl workspace "full swap", mirroring SetCollectionsPath.
+func (e *EnvironmentsView) SetEnvironmentsPath(path string) {
+	e.environmentsPath = path
+	e.ReloadEnvironments()
 }

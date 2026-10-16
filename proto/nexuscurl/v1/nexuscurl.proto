@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package nexuscurl.v1;
+
+option go_package = "github.com/dtour68fc/LazyCurl/internal/nexus/pb/v1;nexuscurlv1";
+
+// Resource is a single synced unit - a whole Collection or a whole
+// Environment, never a sub-field of one. Clients own the actual shape of
+// `content` (it's their existing YAML/JSON serialization, untouched) so
+// this server never needs to understand request/header/script internals,
+// only "store and version this blob". Sync is last-write-wins per
+// Resource: pushing one always replaces the whole thing, it doesn't merge
+// individual fields.
+//
+// `branch` and `parent_revision` aren't used for anything yet (every
+// push today lands on "main" with the previous revision as its parent),
+// but they're here from day one so git-like branching/merging for
+// Collections can be added later without changing the wire format.
+message Resource {
+  // "collection" or "environment".
+  string type = 1;
+  // Resource name, e.g. a collection's name or an environment's name.
+  // Unique per (project, type).
+  string name = 2;
+  // Raw serialized content, in whatever format the client already uses
+  // on disk for this resource type.
+  bytes content = 3;
+  // Server-assigned, monotonically increasing per (project, type, name).
+  // Ignored on Push requests - the server always assigns the next one.
+  int64 revision = 4;
+  int64 parent_revision = 5;
+  string branch = 6;
+  int64 updated_at_unix = 7;
+  // Free-form identifier for who pushed this - no auth yet, so this is
+  // simply whatever the client says it is (e.g. a configured display
+  // name), not verified.
+  string updated_by = 8;
+}
+
+message PullRequest {
+  // Workspace/project name on the server - a server can host more than
+  // one project's worth of Collections/Environments.
+  string project = 1;
+}
+
+message PullResponse {
+  // The current (latest revision, "main" branch) copy of every Resource
+  // in the project.
+  repeated Resource resources = 1;
+}
+
+message PushRequest {
+  string project = 1;
+  // revision/parent_revision/updated_at_unix are ignored if set - the
+  // server fills them in and returns the authoritative copy in
+  // PushResponse.
+  Resource resource = 2;
+}
+
+message PushResponse {
+  // Echoes the resource back with the server-assigned revision/timestamp
+  // filled in, so the client can update its local bookkeeping without a
+  // separate round-trip.
+  Resource resource = 1;
+}
+
+message SubscribeRequest {
+  string project = 1;
+}
+
+// ChangeNotification is sent for every successful Push by any client in
+// the project (including, deliberately, the one that made the change -
+// simpler than every client special-casing "was this my own push",
+// and the UI badge is idempotent either way). It never carries the
+// actual content - the receiving client decides when to Pull it.
+message ChangeNotification {
+  string type = 1;
+  string name = 2;
+  int64 revision = 3;
+  string updated_by = 4;
+}
+
+service NexusCurlService {
+  // Full snapshot of a project's Collections + Environments.
+  rpc Pull(PullRequest) returns (PullResponse);
+
+  // Publish a new revision of one Resource. Last-write-wins: whatever's
+  // pushed replaces the whole previous copy of that (type, name).
+  rpc Push(PushRequest) returns (PushResponse);
+
+  // Long-lived stream of ChangeNotifications for a project. Purely
+  // informational - it never pushes content, so a client that's mid-edit
+  // is never at risk of having its buffer silently clobbered. Reconnects
+  // on drop are the client's responsibility.
+  rpc Subscribe(SubscribeRequest) returns (stream ChangeNotification);
+}

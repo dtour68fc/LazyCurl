@@ -136,6 +136,15 @@ func (c *CollectionsView) GetCollectionsPath() string {
 	return c.collectionsPath
 }
 
+// SetCollectionsPath redirects where collections are loaded from/saved
+// to (and reloads immediately) - used to "full swap" the panel's
+// contents when switching NexusCurl workspaces. Caller is responsible
+// for switching back afterwards; this doesn't remember the previous path.
+func (c *CollectionsView) SetCollectionsPath(path string) {
+	c.collectionsPath = path
+	c.ReloadCollections()
+}
+
 // GetCollections returns the loaded collections
 func (c *CollectionsView) GetCollections() []*api.CollectionFile {
 	return c.collections

@@ -27,6 +27,7 @@ type StatusBar struct {
 	environment  string    // Active environment name
 	hints        string    // Dynamic keybinding hints
 	isFullscreen bool      // Whether fullscreen mode is active
+	workspace    string    // Active NexusCurl workspace name ("" = not using the feature yet)
 }
 
 // NewStatusBar creates a new status bar
@@ -68,6 +69,12 @@ func (s *StatusBar) SetBreadcrumb(parts ...string) {
 // SetEnvironment sets the active environment name
 func (s *StatusBar) SetEnvironment(name string) {
 	s.environment = name
+}
+
+// SetWorkspace sets the active NexusCurl workspace name shown in its own
+// badge (e.g. "local" or a collaborative workspace's name).
+func (s *StatusBar) SetWorkspace(name string) {
+	s.workspace = name
 }
 
 // SetHints sets the dynamic keybinding hints
@@ -140,6 +147,23 @@ func (s *StatusBar) View(width int) string {
 		fullscreenWidth = lipgloss.Width(fullscreenBadge)
 	}
 
+	// Workspace badge (local vs collaborative NexusCurl workspace)
+	var workspaceBadge string
+	workspaceWidth := 0
+	if s.workspace != "" {
+		bg, fg := styles.Surface1, styles.Text
+		if s.workspace != "local" {
+			bg, fg = styles.Blue, styles.Crust
+		}
+		workspaceStyle := lipgloss.NewStyle().
+			Foreground(fg).
+			Background(bg).
+			Bold(true).
+			Padding(0, 1)
+		workspaceBadge = workspaceStyle.Render(s.workspace)
+		workspaceWidth = lipgloss.Width(workspaceBadge)
+	}
+
 	// Environment badge (right side)
 	var envBadge string
 	envWidth := 0
@@ -167,7 +191,7 @@ func (s *StatusBar) View(width int) string {
 	}
 
 	// Calculate middle content width
-	usedWidth := modeWidth + methodWidth + fullscreenWidth + envWidth + statusWidth
+	usedWidth := modeWidth + methodWidth + fullscreenWidth + workspaceWidth + envWidth + statusWidth
 	middleWidth := width - usedWidth
 	if middleWidth < 0 {
 		middleWidth = 0
@@ -230,6 +254,9 @@ func (s *StatusBar) View(width int) string {
 	var parts []string
 	parts = append(parts, modeBadge)
 	parts = append(parts, envBadge)
+	if workspaceBadge != "" {
+		parts = append(parts, workspaceBadge)
+	}
 	if methodBadge != "" {
 		parts = append(parts, methodBadge)
 	}

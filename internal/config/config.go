@@ -267,6 +267,25 @@ func GetGlobalSessionsPath() string {
 	return filepath.Join(GetGlobalConfigDir(), "sessions")
 }
 
+// GetNexusWorkspacesPath returns the file listing configured NexusCurl
+// collaborative workspaces (server+project pairs) and which one is
+// currently active - see internal/nexus for the reader/writer. Lives
+// under the global config dir, same as everything else global-by-default
+// in this app.
+func GetNexusWorkspacesPath() string {
+	return filepath.Join(GetGlobalConfigDir(), "nexus-workspaces.yaml")
+}
+
+// GetNexusCacheDir returns the directory a collaborative workspace's
+// pulled Collections/Environments are cached in, kept separate per
+// workspace name and separate from the normal global collections/
+// environments directories - switching workspaces fully swaps what's
+// shown in the Collections/Environments panels rather than merging
+// pulled data into local files.
+func GetNexusCacheDir(workspaceName string) string {
+	return filepath.Join(GetGlobalConfigDir(), "nexus-cache", workspaceName)
+}
+
 // GetWorkspacePath returns the workspace path (current directory)
 func GetWorkspacePath() (string, error) {
 	return os.Getwd()
