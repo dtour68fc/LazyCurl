@@ -8,14 +8,35 @@ import (
 	nexuscurlv1 "github.com/dtour68fc/LazyCurl/internal/nexus/pb/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // Client is a thin wrapper around the generated gRPC client for one
-// NexusCurlServer connection - no TLS/auth yet (matching the server's
-// current state), that's planned as a later pass on both sides.
+// NexusCurlServer connection - no TLS yet (matching the server's current
+// state), that's planned as a later pass on both sides. API key auth is
+// opt-in via SetAPIKey: callers (like the TUI) that never call it keep
+// talking to the server exactly as before.
 type Client struct {
-	conn *grpc.ClientConn
-	rpc  nexuscurlv1.NexusCurlServiceClient
+	conn   *grpc.ClientConn
+	rpc    nexuscurlv1.NexusCurlServiceClient
+	apiKey string
+}
+
+// SetAPIKey configures the API key sent with every subsequent
+// Pull/Push/Subscribe call via the "x-api-key" gRPC metadata header. An
+// empty key (the default/zero value) sends no header at all, matching
+// today's unauthenticated behavior exactly.
+func (c *Client) SetAPIKey(key string) {
+	c.apiKey = key
+}
+
+// withAPIKey attaches the configured API key to ctx's outgoing metadata,
+// if one has been set.
+func (c *Client) withAPIKey(ctx context.Context) context.Context {
+	if c.apiKey == "" {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx, "x-api-key", c.apiKey)
 }
 
 // Dial connects to a NexusCurlServer at "host:port". Uses grpc.NewClient
@@ -52,6 +73,7 @@ func (c *Client) ListProjects(ctx context.Context) ([]string, error) {
 func (c *Client) Pull(ctx context.Context, project string) ([]*nexuscurlv1.Resource, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	ctx = c.withAPIKey(ctx)
 	resp, err := c.rpc.Pull(ctx, &nexuscurlv1.PullRequest{Project: project})
 	if err != nil {
 		return nil, err
@@ -64,6 +86,7 @@ func (c *Client) Pull(ctx context.Context, project string) ([]*nexuscurlv1.Resou
 func (c *Client) Push(ctx context.Context, project string, res *nexuscurlv1.Resource) (*nexuscurlv1.Resource, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	ctx = c.withAPIKey(ctx)
 	resp, err := c.rpc.Push(ctx, &nexuscurlv1.PushRequest{Project: project, Resource: res})
 	if err != nil {
 		return nil, err
@@ -78,6 +101,7 @@ func (c *Client) Push(ctx context.Context, project string, res *nexuscurlv1.Reso
 // the "auto-retry, give up and fall back to local after repeated
 // failures" policy this app actually wants).
 func (c *Client) Subscribe(ctx context.Context, project string) (<-chan *nexuscurlv1.ChangeNotification, error) {
+	ctx = c.withAPIKey(ctx)
 	stream, err := c.rpc.Subscribe(ctx, &nexuscurlv1.SubscribeRequest{Project: project})
 	if err != nil {
 		return nil, err

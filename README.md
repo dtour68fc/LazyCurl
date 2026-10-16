@@ -95,6 +95,37 @@ lazycurl import postman collection.json
 
 ---
 
+## MCP server (for AI coding agents)
+
+`lazycurl mcp` starts a stdio MCP (Model Context Protocol) server that lets
+AI coding agents create/list/update a NexusCurlServer project's Collections
+(folders + requests) and Environments (variables), including bulk/batch
+tools for migrating large Postman exports or mass-creating gRPC requests:
+
+```bash
+lazycurl mcp --server 10.10.1.107:29500 --project PMC --api-key ncmcp_xxxx...
+```
+
+`--api-key` is optional - if omitted, requests go out unauthenticated,
+matching NexusCurlServer's opt-in key gating (see its README for issuing
+keys with `nexuscurlserver keygen`).
+
+Example MCP client config (VS Code `mcp.json`):
+
+```json
+{
+  "servers": {
+    "lazycurl-nexuscurl": {
+      "type": "stdio",
+      "command": "lazycurl",
+      "args": ["mcp", "--server", "10.10.1.107:29500", "--project", "PMC", "--api-key", "ncmcp_xxxx..."]
+    }
+  }
+}
+```
+
+---
+
 ## Key Shortcuts
 
 | Action | Key |

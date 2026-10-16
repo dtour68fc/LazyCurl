@@ -44,6 +44,20 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Handle mcp subcommand
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		cmd, err := ParseMCPArgs(os.Args[2:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			os.Exit(1)
+		}
+		if err := RunMCPCommand(cmd); err != nil {
+			fmt.Fprintf(os.Stderr, "mcp failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	// Load global config
 	globalConfig, err := config.LoadGlobalConfig()
 	if err != nil {
@@ -86,11 +100,15 @@ func printHelp() {
 Usage:
   lazycurl                         Start the TUI application
   lazycurl import <format> <file>  Import API specification
+  lazycurl mcp --server H:P --project NAME [--api-key KEY]
+                                    Start an MCP server for AI agents
   lazycurl --version               Show version information
   lazycurl --help                  Show this help message
 
 Commands:
   import    Import API specifications into collections
+  mcp       Start a stdio MCP server exposing Collection/Environment
+            tools (for AI coding agents) against a NexusCurlServer project
 
 Import Formats:
   openapi   Import OpenAPI 3.x specification (JSON/YAML)
